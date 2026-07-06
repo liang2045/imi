@@ -36,6 +36,8 @@ yarn-error.log*
 
 # local codex dev logs
 .codex-dev.*.log
+.next-dev.log
+.next-dev.err
 .codex-ui-kit/
 
 # vercel

@@ -1,54 +1,36 @@
-# Design QA
+# Design QA: Dynamic Pricing UI Kit Redesign
 
-- Source visual truth:
-  - `D:\梁.library\images\MQIUY9EOYDZ5H.info\Clipboard - 2026-06-18 10.05.28.png`
-  - `D:\梁.library\images\MQIUYDM1BQM7L.info\Clipboard - 2026-06-18 10.05.34.png`
-  - `D:\梁.library\images\MQIUYGTW335NP.info\Clipboard - 2026-06-18 10.05.38.png`
-- Implementation screenshots: `qa-desktop.png`, `qa-shipping.png`, `qa-analytics.png`
-- Combined comparison: `qa-comparison.png`
-- Browser: Chrome
-- Desktop viewport: 2560 × 1271 CSS pixels; focused captures use 1440 × 1000, 1200 × 800 and 800 × 600 crops.
-- State: logged-in administrator, 2026年6月, populated demo dataset.
+source visual truth path: `E:\_tmp_dynamic_pricing_ui_kit\dynamic-pricing-ui-kit\preview\preview.png`
+implementation screenshot path: `E:\imi\qa-dynamic-pricing-redesign.png`
+comparison evidence path: `E:\imi\qa-dynamic-pricing-comparison.png`
+viewport: desktop, 1711 x 1072 browser screenshot
+state: logged-in local demo, monthly collaboration detail view
 
-## Full-view comparison evidence
+## Full-View Comparison Evidence
 
-The combined comparison confirms the same dark left navigation, warm off-white canvas, three primary spend metrics, large execution progress panel, right-aligned status chart and muted brown data palette. Metric values were calibrated to the reference: ¥75,750, ¥2,295 and 95%; execution was calibrated to 17 / 30 and 57%.
+The comparison image places the source preview on the left and the imi dashboard implementation on the right. The implementation carries over the source system's cold white canvas, floating white surfaces, narrow icon sidebar, soft elevation, cyan active navigation state, purple primary actions, low-contrast table/grid lines, and rounded card language.
 
-Shipping and analysis captures confirm that the reference information architecture is preserved: three-column logistics board, settlement/status grouping, cooperation-intent pie chart, brand-side result chart and rejection-reason word display.
-
-## Focused region evidence
-
-- Header and sidebar: Tabler outline icons provide consistent stroke weight; selected navigation uses the same low-contrast gray highlight as the reference.
-- Metrics: typography hierarchy, currency weight, progress bar color and helper-copy density match the source intent.
-- Workflow and logistics cards: card spacing, grouped columns, status chips and horizontal overflow preserve the dense operational layout.
-- Charts: legends, labels, pie/bar palette and neutral grid lines remain readable on the warm background.
+Focused region comparison was not needed beyond the full-view comparison because the source is a broad dashboard design system reference rather than a one-to-one screen for the imi product. The implementation was judged against the required design surfaces and the included tokens/components.
 
 ## Findings
 
-- No actionable P0/P1/P2 findings remain.
-- P3: the source photos include camera perspective, browser chrome and laptop hardware; the implementation is compared as a clean browser viewport by design.
-- P3: Chrome extension capture did not expose viewport emulation, so mobile behavior was validated through responsive CSS and component structure rather than a 390px screenshot.
+No actionable P0/P1/P2 findings remain.
 
-## Required fidelity surfaces
+- Fonts and typography: passed. The implementation uses the specified Inter/system fallback stack, tabular numerals, restrained weights, and removed negative tracking globally.
+- Spacing and layout rhythm: passed. Desktop shell now uses a floating narrow sidebar, suspended topbar, 18px cards, generous gutters, and low-noise grid rhythm consistent with the UI kit.
+- Colors and visual tokens: passed. The app maps primary emphasis to `#6F4EF6`, active/supporting chart emphasis to `#20C5E8`, cool background to `#F4F7FA`, white card surfaces, and `#E7ECF1` separators.
+- Image quality and asset fidelity: passed. The target system is UI-token/component driven; no missing raster product imagery was required. Existing Tabler line icons remain consistent with the linear icon guidance.
+- Copy and content: passed. App-specific Chinese product copy and data are intentionally retained; only visual treatment changed.
 
-- Fonts and typography: passed; Geist with Microsoft YaHei/PingFang fallbacks gives stable Chinese UI rendering and matching weight hierarchy.
-- Spacing and layout rhythm: passed; desktop grids, section gaps, card padding and horizontal boards match the reference density.
-- Colors and tokens: passed; dark charcoal navigation, warm gray canvas, pale cards and brown data accents are consistently tokenized.
-- Image quality and assets: passed; the source contains no product imagery or custom illustration assets. All UI icons use the Tabler icon package; no handcrafted SVG or placeholder artwork is used.
-- Copy and content: passed; Chinese labels are coherent and operationally specific.
-- Responsiveness: passed by implementation review; mobile drawer navigation, single-column metrics and horizontally scrollable boards are present.
-- Accessibility: passed for labels, focus states, semantic controls and practical tap targets; decorative data charts retain surrounding text labels.
+## Patches Made
 
-## Patches made since first comparison
+- Replaced the previous warm/neumorphic global theme with Dynamic Pricing tokens, shadows, radii, button, card, table, form, tag, progress, hover, focus, disabled, and reduced-motion states.
+- Added dashboard shell classes and defaulted the desktop sidebar to the narrow icon-only mode while retaining expand/collapse behavior.
+- Updated chart colors, grid opacity, legends, ring/bar styling, and tooltip surfaces to match the new visual system.
 
-- Calibrated spend, average cost, budget percentage and execution progress to the reference values.
-- Replaced vulnerable SheetJS dependency with ExcelJS and pinned secure transitive versions.
-- Fixed the add-influencer submission path and verified the record appears in the resource table.
-- Verified logistics status advancement and all chart routes in Chrome.
+## Follow-Up Polish
 
-## Follow-up polish
-
-- Capture dedicated 390px and 768px screenshots when Chrome viewport emulation is available.
-- Replace the local logistics mock with the selected courier provider adapter before production launch.
+- P3: A future pass could recompose the monthly dashboard into the exact source preview's card mosaic, but that would change information architecture more than the requested design-system reskin.
+- P3: The kanban and deeper resource-library tables inherit the new tokens, but could get bespoke compact row/card variants if the team wants an even closer operational-dashboard density.
 
 final result: passed

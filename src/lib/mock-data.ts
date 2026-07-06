@@ -34,6 +34,12 @@ const mayProjectProgress = [
   { name: "舆情处理", budgetCents: 500000, rechargedCents: 0, consumedCents: 279200, remainingRechargeCents: 500000 },
   { name: "供应商", budgetCents: 8500000, rechargedCents: 0, consumedCents: 6330900, remainingRechargeCents: 8500000 },
 ];
+const earlyProjectProgress = mayProjectProgress.map((project) => ({
+  ...project,
+  rechargedCents: 0,
+  consumedCents: 0,
+  remainingRechargeCents: project.budgetCents,
+}));
 const julyProjectProgress = [
   { name: "小红书", budgetCents: 60000000, rechargedCents: 12000000, consumedCents: 8360000, remainingRechargeCents: 48000000 },
   { name: "抖音", budgetCents: 79000000, rechargedCents: 18000000, consumedCents: 11450000, remainingRechargeCents: 61000000 },
@@ -78,6 +84,9 @@ const julySixDayCollaborations = Array.from({ length: 12 }, (_, i) => {
 export const initialState: AppState = {
   budgetCents: 8000000,
   monthlyFinance: {
+    "2026-01": { budgetCents: 165000000, averageCents: 229500, projectProgress: earlyProjectProgress },
+    "2026-02": { budgetCents: 165000000, averageCents: 229500, projectProgress: earlyProjectProgress },
+    "2026-03": { budgetCents: 165000000, averageCents: 229500, projectProgress: earlyProjectProgress },
     "2026-04": { budgetCents: 165000000, averageCents: 229500, projectProgress: mayProjectProgress },
     "2026-05": { budgetCents: 165000000, averageCents: 229500, projectProgress: mayProjectProgress },
     "2026-06": { budgetCents: 165000000, averageCents: 229500, projectProgress: mayProjectProgress },

@@ -5,7 +5,6 @@ import ExcelJS from "exceljs";
 import {
   IconAddressBook,
   IconBrandCampaignmonitor,
-  IconBrandDingtalk,
   IconCalendarMonth,
   IconChartPie,
   IconChevronLeft,
@@ -16,7 +15,6 @@ import {
   IconDownload,
   IconExternalLink,
   IconFileAnalytics,
-  IconLogout,
   IconMenu2,
   IconPencil,
   IconRefresh,
@@ -37,12 +35,10 @@ import { ensureMonthFinance, getAvailableMonths, getCurrentMonthValue } from "@/
 import { hasOnlyManualSignedPrompt, hasSignedEvent } from "@/lib/shipping-status";
 import { BarChart, PieChart } from "./charts";
 
-type View = "overview" | "influencers" | "creatorDatabase" | "calendar" | "shipping" | "monthly" | "analytics" | "team";
-type AuthUser = { name: string; role: "admin" | "member"; status?: "active" | "pending" | "disabled"; avatarUrl?: string };
-type AuthSession = { dingtalkEnabled: boolean; user: AuthUser | null };
-type DrilldownField = "cooperationIntent" | "influencerRejectReason" | "brandResult" | "brandRejectReason";
+type View = "overview" | "influencers" | "creatorDatabase" | "calendar" | "shipping" | "shippingSummary" | "monthly" | "analytics" | "team";
+type DrilldownField = "paymentStatus" | "cooperationIntent" | "influencerRejectReason" | "brandResult" | "brandRejectReason";
 type DrilldownFilter = { field: DrilldownField; value: string; title: string };
-type CreatorDatabaseSortKey = "name" | "platform" | "city" | "status" | "intent" | "brandResult" | "rejectReason" | "owner" | "fee";
+type CreatorDatabaseSortKey = "name" | "platform" | "city" | "status" | "paymentStatus" | "intent" | "brandResult" | "rejectReason" | "owner" | "fee";
 type SortDirection = "asc" | "desc";
 type CreatorDatabaseSort = { key: CreatorDatabaseSortKey; direction: SortDirection };
 type ShippingApiResponse = {
@@ -63,6 +59,7 @@ const nav: { id: View; label: string; icon: typeof IconDashboard }[] = [
   { id: "creatorDatabase", label: "达人数据库", icon: IconDatabase },
   { id: "calendar", label: "达人档期日历", icon: IconCalendarMonth },
   { id: "shipping", label: "样品邮寄情况", icon: IconTruckDelivery },
+  { id: "shippingSummary", label: "全年样品汇总", icon: IconFileAnalytics },
   { id: "monthly", label: "每月达人合作详情", icon: IconChartPie },
   { id: "analytics", label: "达人建联情况分析", icon: IconFileAnalytics },
   { id: "team", label: "团队与权限", icon: IconUsers },
@@ -92,6 +89,14 @@ function toneFor(text: string) {
   return tagTone[sum % tagTone.length];
 }
 
+function platformTagClass(platform: PlatformAccount["platform"]) {
+  if (platform === platforms[0]) return "tag-platform-xhs";
+  if (platform === platforms[1]) return "tag-platform-douyin";
+  if (platform === platforms[2]) return "tag-platform-weibo";
+  if (platform === platforms[3]) return "tag-platform-bilibili";
+  return toneFor(platform);
+}
+
 function monthLabel(value: string) {
   const [year, month] = value.split("-");
   return `${year}年${Number(month)}月`;
@@ -107,6 +112,24 @@ function getMonthAverageCents(state: AppState, month: string) {
 
 function getMonthProjectProgress(state: AppState, month: string) {
   return state.monthlyFinance?.[month]?.projectProgress || [];
+}
+
+function getYearProjectProgress(state: AppState, year: string) {
+  const months = Object.entries(state.monthlyFinance || {})
+    .filter(([month]) => month.startsWith(`${year}-`))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const projects = months.reduce((map, [, config]) => {
+    (config.projectProgress || []).forEach((project) => {
+      const current = map.get(project.name) || { name: project.name, budgetCents: 0, rechargedCents: 0, consumedCents: 0, remainingRechargeCents: 0 };
+      current.budgetCents += project.budgetCents;
+      current.rechargedCents += project.rechargedCents;
+      current.consumedCents += project.consumedCents;
+      current.remainingRechargeCents += project.remainingRechargeCents;
+      map.set(project.name, current);
+    });
+    return map;
+  }, new Map<string, MonthlyProjectFinance>());
+  return { months: months.map(([month]) => month), projects: Array.from(projects.values()) };
 }
 
 function saveMonthProjectProgress(state: AppState, month: string, projects: MonthlyProjectFinance[]): AppState {
@@ -265,16 +288,17 @@ function buildShippingProductSummary(items: Collaboration[]) {
   const shipped = items.filter((item) => item.shippingStatus !== "待寄出");
   const rows = Array.from(shipped.reduce((map, item) => {
     const code = item.sampleProductCode?.trim() || "未填写编码";
-    const current = map.get(code) || { code, content: item.sampleContent || "未填写样品", shipments: 0, quantity: 0, signed: 0, inTransit: 0, exception: 0, trackingNos: [] as string[] };
+    const current = map.get(code) || { code, content: item.sampleContent || "未填写样品", shipments: 0, quantity: 0, signed: 0, inTransit: 0, exception: 0, trackingNos: [] as string[], senders: [] as string[] };
     current.shipments += 1;
     current.quantity += item.sampleQuantity || 1;
     current.signed += item.shippingStatus === "已签收" ? 1 : 0;
     current.inTransit += item.shippingStatus === "已寄出" && transitStatusFor(item) === "在途" ? 1 : 0;
     current.exception += transitStatusFor(item) === "异常" ? 1 : 0;
     if (item.trackingNo) current.trackingNos.push(item.trackingNo);
+    if (item.owner && !current.senders.includes(item.owner)) current.senders.push(item.owner);
     map.set(code, current);
     return map;
-  }, new Map<string, { code: string; content: string; shipments: number; quantity: number; signed: number; inTransit: number; exception: number; trackingNos: string[] }>()).values());
+  }, new Map<string, { code: string; content: string; shipments: number; quantity: number; signed: number; inTransit: number; exception: number; trackingNos: string[]; senders: string[] }>()).values());
   return {
     shipped,
     rows,
@@ -301,10 +325,7 @@ export function DashboardApp() {
   const [view, setView] = useState<View>("monthly");
   const [month, setMonth] = useState(currentMonth);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const [signedIn, setSignedIn] = useState(false);
-  const [authSession, setAuthSession] = useState<AuthSession>({ dingtalkEnabled: false, user: null });
-  const [authLoading, setAuthLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [drilldownFilter, setDrilldownFilter] = useState<DrilldownFilter | null>(null);
@@ -331,33 +352,6 @@ export function DashboardApp() {
     if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, loaded]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/session")
-      .then((res) => res.json() as Promise<AuthSession>)
-      .then((session) => {
-        if (cancelled) return;
-        setAuthSession(session);
-        if (session.user?.status === "active") {
-          setSignedIn(true);
-          setState((current) => ({ ...current, currentUser: { name: session.user!.name, role: session.user!.role } }));
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setAuthLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-    setSignedIn(false);
-    setAuthSession((session) => ({ ...session, user: null }));
-  };
-
   const resetLocalData = () => {
     localStorage.removeItem(STORAGE_KEY);
     setState(ensureMonthFinance(initialState, currentMonth));
@@ -370,23 +364,21 @@ export function DashboardApp() {
     setSidebarOpen(false);
   };
 
-  if (authLoading) return <main className="grid min-h-screen place-items-center bg-[#f8f4ee] p-5"><div className="card p-6 text-sm text-[#7b6258]">正在检查登录状态...</div></main>;
-  if (!signedIn) return <Login dingtalkEnabled={authSession.dingtalkEnabled} onLogin={() => setSignedIn(true)} />;
-
   const content =
-    view === "overview" ? <Overview state={state} setState={setState} month={month} /> :
+    view === "overview" ? <Overview state={state} setState={setState} month={month} onDrilldown={openCreatorDatabase} /> :
     view === "influencers" ? <Influencers state={state} setState={setState} onAdd={() => setShowAdd(true)} /> :
     view === "creatorDatabase" ? <CreatorDatabase state={state} month={month} filter={drilldownFilter} onClearFilter={() => setDrilldownFilter(null)} /> :
     view === "calendar" ? <Calendar state={state} month={month} /> :
     view === "shipping" ? <Shipping state={state} setState={setState} month={month} /> :
+    view === "shippingSummary" ? <ShippingSummaryPage state={state} month={month} /> :
     view === "monthly" ? <Monthly state={state} setState={setState} month={month} /> :
     view === "analytics" ? <Analytics state={state} month={month} onDrilldown={openCreatorDatabase} /> :
     <Team state={state} />;
   const monthOptions = getAvailableMonths(state, month);
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7]">
-      <aside className={`fixed inset-y-0 left-0 z-40 bg-[#30313a] text-white transition-all duration-200 ${collapsed ? "w-[82px]" : "w-[286px]"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+    <div className="dashboard-shell min-h-screen bg-[#f5f5f7]">
+      <aside className={`dashboard-sidebar fixed inset-y-0 left-0 z-40 bg-[#30313a] text-white transition-all duration-200 ${collapsed ? "is-collapsed w-[82px]" : "is-expanded w-[286px]"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#eef0f2] text-[#30313a]"><IconBrandCampaignmonitor size={23} /></div>
           {!collapsed && <div className="min-w-0"><div className="truncate text-base font-semibold">imi达人管理</div><div className="text-xs text-[#c8cbd1]">IMI CREATOR OPS</div></div>}
@@ -397,12 +389,15 @@ export function DashboardApp() {
           {nav.map((item) => <button key={item.id} title={item.label} onClick={() => { if (item.id === "creatorDatabase") setDrilldownFilter(null); setView(item.id); setSidebarOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${view === item.id ? "bg-[#eef0f2] text-[#30313a]" : "text-[#d8dbe0] hover:bg-white/10"}`}><item.icon size={21} />{!collapsed && item.label}</button>)}
         </nav>
         <div className="absolute inset-x-3 bottom-4 border-t border-white/10 pt-4">
-          <button onClick={logout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#c8cbd1] hover:bg-white/10"><IconLogout size={19} />{!collapsed && "退出登录"}</button>
+          <div className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#c8cbd1]">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#593229] text-xs font-semibold text-white">{state.currentUser.name.slice(0, 1)}</div>
+            {!collapsed && <span>{state.currentUser.name}</span>}
+          </div>
         </div>
       </aside>
 
-      <main className={`transition-all duration-200 ${collapsed ? "md:ml-[82px]" : "md:ml-[286px]"}`}>
-        <header className="sticky top-0 z-30 flex h-20 items-center border-b border-[#eadbd2] bg-[#fffaf6]/88 px-4 backdrop-blur md:px-8">
+      <main className={`dashboard-main transition-all duration-200 ${collapsed ? "md:ml-[82px]" : "md:ml-[286px]"}`}>
+        <header className="dashboard-topbar sticky top-0 z-30 flex h-20 items-center border-b border-[#eadbd2] bg-[#fffaf6]/88 px-4 backdrop-blur md:px-8">
           <button className="mr-3 md:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开导航"><IconMenu2 /></button>
           <div><h1 className="text-lg font-semibold md:text-xl">{nav.find((n) => n.id === view)?.label}</h1><p className="hidden text-xs text-[#7b6258] sm:block">集中管理达人合作进度、费用与交付</p></div>
           <div className="ml-auto flex items-center gap-2">
@@ -411,36 +406,13 @@ export function DashboardApp() {
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#593229] text-sm font-semibold text-white">{state.currentUser.name.slice(0, 1)}</div>
           </div>
         </header>
-        <div className="p-4 md:p-8">{content}</div>
+        <div className="dashboard-content p-4 md:p-8">{content}</div>
       </main>
 
       {sidebarOpen && <button aria-label="关闭导航" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-black/40 md:hidden" />}
       {showAdd && <AddInfluencer onClose={() => setShowAdd(false)} onSave={(influencer) => { setState((s) => ({ ...s, influencers: [influencer, ...s.influencers] })); setShowAdd(false); }} />}
       {showSettings && <SettingsModal state={state} month={month} months={monthOptions} onClose={() => setShowSettings(false)} onSave={({ budgetYuan, userName, defaultMonth, exportDirectory }) => { setState((s) => ({ ...s, monthlyFinance: { ...s.monthlyFinance, [defaultMonth]: { ...s.monthlyFinance?.[defaultMonth], budgetCents: Math.round(budgetYuan * 100) } }, settings: { ...s.settings, exportDirectory: exportDirectory.trim() || undefined }, currentUser: { ...s.currentUser, name: userName } })); setMonth(defaultMonth); setShowSettings(false); }} onReset={resetLocalData} />}
     </div>
-  );
-}
-
-function Login({ dingtalkEnabled, onLogin }: { dingtalkEnabled: boolean; onLogin: () => void }) {
-  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const authError = params?.get("auth_error");
-  const message = authError === "account_pending" ? "账号已关联钉钉，等待管理员启用。" : authError === "dingtalk_not_configured" ? "钉钉登录尚未配置，已保留本地演示登录。" : authError ? "钉钉登录失败，请稍后重试或联系管理员。" : "";
-  return (
-    <main className="grid min-h-screen place-items-center bg-[#f8f4ee] p-5">
-      <section className="card w-full max-w-[430px] bg-white p-8 md:p-10">
-        <div className="mb-8 flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-[#f06d22] text-white"><IconBrandCampaignmonitor /></div><div><h1 className="text-xl font-semibold">imi达人管理</h1><p className="text-xs text-[#7b6258]">IMI CREATOR OPS</p></div></div>
-        <h2 className="mb-1 text-2xl font-semibold">欢迎回来</h2>
-        <p className="mb-7 text-sm text-[#687282]">登录团队工作台继续管理达人合作</p>
-        {message && <p className="mb-4 rounded-xl border border-[#fecdd3] bg-[#fff1f2] p-3 text-xs leading-5 text-[#9f1239]">{message}</p>}
-        {dingtalkEnabled && <a href="/api/auth/dingtalk/start" className="btn btn-primary mb-4 w-full"><IconBrandDingtalk size={18} />使用钉钉登录</a>}
-        <form onSubmit={(e) => { e.preventDefault(); onLogin(); }} className="space-y-4">
-          <label className="block text-sm">邮箱<input className="control mt-2 w-full" type="email" defaultValue="admin@example.com" required /></label>
-          <label className="block text-sm">密码<input className="control mt-2 w-full" type="password" defaultValue="demo123456" required /></label>
-          <button className="btn mt-2 w-full" type="submit">{dingtalkEnabled ? "进入本地演示模式" : "登录工作台"}</button>
-        </form>
-        <p className="mt-5 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-3 text-xs leading-5 text-[#687282]">{dingtalkEnabled ? "已启用钉钉登录。演示登录仅用于本机预览，不写入服务端会话。" : "当前为本地演示模式。配置钉钉和本地 Supabase 环境变量后启用团队账号与本地服务器数据。"}</p>
-      </section>
-    </main>
   );
 }
 
@@ -468,7 +440,7 @@ function SettingsModal({ state, month, months, onClose, onSave, onReset }: { sta
             <label className="text-sm">导出表格保存目录<input className="control mt-2 w-full" value={exportDirectory} onChange={(event) => setExportDirectory(event.target.value)} placeholder="例如 E:\imi-exports" /></label>
             <p className="text-xs leading-5 text-[#687282]">填写后，达人资源库和样品邮寄导出的 Excel 会保存到运行本应用的这台电脑目录。留空时仍使用浏览器下载。</p>
             <button type="button" className="btn text-xs" onClick={() => setConfirmReset(true)}><IconRefresh size={16} />清空本地演示数据并恢复默认</button>
-            {confirmReset && <div className="rounded-xl border border-[#fecdd3] bg-[#fff1f2] p-3 text-xs text-[#9f1239]"><p className="mb-3">确认后会删除浏览器本地演示数据，但不会退出登录。</p><div className="flex gap-2"><button type="button" className="btn" onClick={() => setConfirmReset(false)}>取消</button><button type="button" className="btn btn-primary" onClick={() => { onReset(); setConfirmReset(false); }}>确认重置</button></div></div>}
+            {confirmReset && <div className="rounded-xl border border-[#fecdd3] bg-[#fff1f2] p-3 text-xs text-[#9f1239]"><p className="mb-3">确认后会删除浏览器本地演示数据，但不会影响当前页面访问。</p><div className="flex gap-2"><button type="button" className="btn" onClick={() => setConfirmReset(false)}>取消</button><button type="button" className="btn btn-primary" onClick={() => { onReset(); setConfirmReset(false); }}>确认重置</button></div></div>}
           </SettingsSection>
           <SettingsSection title="物流设置">
             <p className="text-sm leading-6 text-[#475569]">
@@ -535,7 +507,7 @@ function ProjectRechargeProgress({ projects, executionPercent, progressed, targe
   const used = (project: MonthlyProjectFinance) => project.budgetCents ? Math.round(project.consumedCents / project.budgetCents * 10000) / 100 : 0;
   return (
     <section>
-      <SectionTitle title="项目充值进度" action={<div className="flex items-center gap-2"><span className="hidden text-xs text-[#757A84] sm:inline">按项目预算、充值、消耗拆分</span>{onSave && <button type="button" className="btn h-9 min-h-9 px-3 text-xs" onClick={() => setEditing(true)}><IconPencil size={15} />编辑充值</button>}</div>} />
+      <SectionTitle title="项目充值进度" action={<div className="flex items-center gap-2"><span className="hidden text-xs text-[#757A84] sm:inline">按项目预算、充值、消耗拆分</span>{onSave && <button type="button" className="btn btn-primary h-9 min-h-9 px-3 text-xs" onClick={() => setEditing(true)}><IconPencil size={15} />编辑充值</button>}</div>} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
         <div className="card overflow-hidden">
           <div className="grid grid-cols-5 border-b border-[#E3E6EC] bg-[#FAFAFC] px-5 py-3 text-xs text-[#757A84]">
@@ -785,7 +757,7 @@ function ProjectProgressSyncActions({ state, setState, month, projects, onMessag
   );
 }
 
-function Overview({ state, setState, month }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; month: string }) {
+function Overview({ state, setState, month, onDrilldown }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; month: string; onDrilldown: (filter: DrilldownFilter) => void }) {
   const [message, setMessage] = useState("");
   const [persistentMessage, setPersistentMessage] = useState(false);
   const items = state.collaborations.filter((c) => c.month === month);
@@ -804,10 +776,11 @@ function Overview({ state, setState, month }: { state: AppState; setState: React
   };
   return (
     <div className="space-y-7">
+      <AnnualRechargeBudget state={state} month={month} />
       <SectionTitle title="本月合作数据" action={<ProjectProgressSyncActions state={state} setState={setState} month={month} projects={projectProgress} onMessage={showMessage} />} />
       {message && <p className="flex items-center justify-between gap-3 rounded-xl border border-[#bfdbfe] bg-[#dbeafe] p-3 text-xs text-[#1d4ed8]"><span>{message}</span><button type="button" className="shrink-0 rounded-lg px-2 py-1 hover:bg-white/70" onClick={() => { setMessage(""); setPersistentMessage(false); }}>关闭</button></p>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Metric label="合作达人" value={`${items.length}`} note="本月全部合作记录" tone={0} /><Metric label="达人花费" value={money(a.spendCents)} note={`预算使用 ${a.budgetPercent}%`} tone={1} /><Metric label="已发布内容" value={`${published}`} note="包含已完成合作" tone={2} /><Metric label="待处理任务" value={`${pending}`} note="需要跟进的合作节点" tone={3} /></div>
-      <div className="grid gap-4 xl:grid-cols-[1.25fr_.75fr]"><ChartCard title="本月合作进度"><BarChart data={groupCount(items, "status")} height={380} /></ChartCard><ChartCard title="费用状态"><PieChart data={groupCount(items, "paymentStatus")} height={380} /></ChartCard></div>
+      <div className="grid gap-4 xl:grid-cols-[1.25fr_.75fr]"><ChartCard title="本月合作进度"><BarChart data={groupCount(items, "status")} height={380} /></ChartCard><ChartCard title="费用状态"><PieChart data={groupCount(items, "paymentStatus")} height={380} onItemClick={(value) => onDrilldown({ field: "paymentStatus", value, title: "费用状态" })} /></ChartCard></div>
       <ProjectRechargeProgress projects={projectProgress} executionPercent={a.executionPercent} progressed={a.progressed} target={a.executionTarget} onSave={(projects) => setState((current) => saveMonthProjectProgress(current, month, projects))} />
     </div>
   );
@@ -930,6 +903,50 @@ function parseProjectProgressRawRows(rawRows: string[][], fallbackProjects: Mont
     if (budgetCents > 0) projects.push({ name, budgetCents, rechargedCents, consumedCents, remainingRechargeCents });
   });
   return normalizeProjectRows(projects);
+}
+
+function AnnualRechargeBudget({ state, month }: { state: AppState; month: string }) {
+  const year = month.slice(0, 4);
+  const yearly = getYearProjectProgress(state, year);
+  const totals = projectProgressTotals(yearly.projects);
+  const rechargePercent = totals.budgetCents ? Math.round(totals.rechargedCents / totals.budgetCents * 10000) / 100 : 0;
+  const consumePercent = totals.budgetCents ? Math.round(totals.consumedCents / totals.budgetCents * 10000) / 100 : 0;
+  const topProjects = [...yearly.projects].sort((a, b) => b.budgetCents - a.budgetCents).slice(0, 5);
+  return (
+    <section className="card overflow-hidden p-5">
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-medium text-[#20C5E8]">{year} 年度</p>
+          <h2 className="mt-1 text-xl font-semibold text-[#1d2638]">年度充值预算</h2>
+          <p className="mt-1 text-sm text-[#667085]">汇总全年各月项目充值预算、已充值、已消耗与剩余额度。</p>
+        </div>
+        <div className="rounded-xl bg-[#f8fafc] px-4 py-3 text-right">
+          <p className="text-xs text-[#667085]">覆盖月份</p>
+          <strong className="mt-1 block text-lg text-[#6F4EF6]">{yearly.months.length} 个月</strong>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-xl bg-[#f8fafc] p-4"><p className="text-xs text-[#667085]">年度充值预算</p><strong className="mt-2 block text-2xl text-[#6F4EF6]">{money(totals.budgetCents)}</strong></div>
+        <div className="rounded-xl bg-[#f8fafc] p-4"><p className="text-xs text-[#667085]">年度已充值</p><strong className="mt-2 block text-2xl text-[#20C5E8]">{money(totals.rechargedCents)}</strong><span className="mt-1 block text-xs text-[#98a2b3]">充值进度 {rechargePercent}%</span></div>
+        <div className="rounded-xl bg-[#f8fafc] p-4"><p className="text-xs text-[#667085]">年度已消耗</p><strong className="mt-2 block text-2xl text-[#F29A57]">{money(totals.consumedCents)}</strong><span className="mt-1 block text-xs text-[#98a2b3]">消耗占比 {consumePercent}%</span></div>
+        <div className="rounded-xl bg-[#f8fafc] p-4"><p className="text-xs text-[#667085]">剩余可充值</p><strong className="mt-2 block text-2xl text-[#32C59D]">{money(totals.remainingRechargeCents)}</strong></div>
+      </div>
+      {topProjects.length ? (
+        <div className="mt-5 grid gap-3 lg:grid-cols-5">
+          {topProjects.map((project) => {
+            const percent = project.budgetCents ? Math.min(100, Math.round(project.rechargedCents / project.budgetCents * 100)) : 0;
+            return (
+              <div key={project.name} className="rounded-xl border border-[#e7ecf1] bg-white p-3">
+                <div className="flex items-center justify-between gap-2 text-sm"><span className="font-medium">{project.name}</span><span className="text-xs text-[#667085]">{percent}%</span></div>
+                <Progress value={percent} />
+                <p className="mt-2 text-xs text-[#667085]">{money(project.rechargedCents)} / {money(project.budgetCents)}</p>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function createInfluencerWorkbook(influencers: Influencer[]) {
@@ -1175,7 +1192,7 @@ function Influencers({ state, setState, onAdd }: { state: AppState; setState: Re
         <div className="overflow-x-auto"><table className="w-full min-w-[1040px] text-left text-sm"><thead className="bg-[#f8fafc] text-xs text-[#687282]"><tr><th className="px-5 py-3 font-medium">达人</th><th className="px-5 py-3 font-medium">多平台账号</th><th className="px-5 py-3 font-medium">类型/城市</th><th className="px-5 py-3 font-medium"><button type="button" onClick={refreshVisibleFollowers} disabled={refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 hover:bg-white hover:text-[#111827]" title="点击刷新当前筛选结果的粉丝数"><IconRefresh size={13} />{refreshing === "all" ? "刷新中" : "总粉丝"}</button></th><th className="px-5 py-3 font-medium">参考报价</th><th className="px-5 py-3 font-medium">标签</th><th className="px-5 py-3 font-medium">联系方式</th><th className="px-3 py-3 text-center font-medium">操作</th></tr></thead><tbody>{filtered.map((i) => {
           const accounts = accountList(i);
           const totalFollowers = accounts.reduce((sum, a) => sum + a.followers, 0);
-          return <tr key={i.id} className="border-t border-[#e5e7eb] align-top hover:bg-white"><td className="px-5 py-4"><div className="font-medium">{i.name}</div><div className="text-xs text-[#7b8492]">{accounts.length} 个平台账号</div></td><td className="px-5 py-4"><div className="space-y-2">{accounts.map((a) => <div key={a.id} className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2"><div className="flex flex-wrap items-center gap-2"><span className={`tag ${toneFor(a.platform)}`}>{a.platform}</span><a href={a.url || profileSearchUrl(a.platform, a.handle)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-[#1d4ed8] hover:underline">{a.handle || "未填写账号"}<IconExternalLink size={13} /></a></div><p className="mt-1 text-xs text-[#687282]">粉丝 {formatFollowers(a.followers)}{a.lastSyncedAt ? ` · ${new Date(a.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })}` : ""}</p></div>)}</div></td><td className="px-5 py-4"><div>{i.type}</div><div className="mt-1 text-xs text-[#687282]">{i.city}</div></td><td className="px-5 py-4"><button type="button" onClick={() => refreshInfluencerFollowers(i)} disabled={refreshing === i.id || refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-[#f1f5f9] disabled:opacity-60" title="点击刷新该达人所有平台粉丝数"><IconRefresh size={13} className={refreshing === i.id ? "animate-spin" : ""} />{refreshing === i.id ? "刷新中" : formatFollowers(totalFollowers)}</button></td><td className="px-5 py-4 font-medium">{money(i.quoteCents)}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-1">{i.tags.slice(0, 3).map((t) => <span className={`tag ${toneFor(t)}`} key={t}>{t}</span>)}</div></td><td className="px-5 py-4">{i.phone}</td><td className="px-3 py-4"><div className="flex justify-center gap-1"><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e5e7eb] text-[#475569] hover:bg-[#f8fafc] hover:text-[#111827]" onClick={() => setEditing(i)} title="编辑" aria-label={`编辑 ${i.name}`}><IconPencil size={15} /></button><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#fee2e2] text-[#be123c] hover:bg-[#fff1f2]" onClick={() => deleteInfluencer(i.id)} title="删除" aria-label={`删除 ${i.name}`}><IconTrash size={15} /></button></div></td></tr>;
+          return <tr key={i.id} className="border-t border-[#e5e7eb] align-top hover:bg-white"><td className="px-5 py-4"><div className="font-medium">{i.name}</div><div className="text-xs text-[#7b8492]">{accounts.length} 个平台账号</div></td><td className="px-5 py-4"><div className="space-y-2">{accounts.map((a) => <div key={a.id} className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2"><div className="flex flex-wrap items-center gap-2"><span className={`tag ${platformTagClass(a.platform)}`}>{a.platform}</span><a href={a.url || profileSearchUrl(a.platform, a.handle)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-[#1d4ed8] hover:underline">{a.handle || "未填写账号"}<IconExternalLink size={13} /></a></div><p className="mt-1 text-xs text-[#687282]">粉丝 {formatFollowers(a.followers)}{a.lastSyncedAt ? ` · ${new Date(a.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })}` : ""}</p></div>)}</div></td><td className="px-5 py-4"><div>{i.type}</div><div className="mt-1 text-xs text-[#687282]">{i.city}</div></td><td className="px-5 py-4"><button type="button" onClick={() => refreshInfluencerFollowers(i)} disabled={refreshing === i.id || refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-[#f1f5f9] disabled:opacity-60" title="点击刷新该达人所有平台粉丝数"><IconRefresh size={13} className={refreshing === i.id ? "animate-spin" : ""} />{refreshing === i.id ? "刷新中" : formatFollowers(totalFollowers)}</button></td><td className="px-5 py-4 font-medium">{money(i.quoteCents)}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-1">{i.tags.slice(0, 3).map((t) => <span className={`tag ${toneFor(t)}`} key={t}>{t}</span>)}</div></td><td className="px-5 py-4">{i.phone}</td><td className="px-3 py-4"><div className="flex justify-center gap-1"><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e5e7eb] text-[#475569] hover:bg-[#f8fafc] hover:text-[#111827]" onClick={() => setEditing(i)} title="编辑" aria-label={`编辑 ${i.name}`}><IconPencil size={15} /></button><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#fee2e2] text-[#be123c] hover:bg-[#fff1f2]" onClick={() => deleteInfluencer(i.id)} title="删除" aria-label={`删除 ${i.name}`}><IconTrash size={15} /></button></div></td></tr>;
         })}</tbody></table></div>
       </div>
       {editing && <InfluencerForm title="编辑达人" initial={editing} onClose={() => setEditing(null)} onSave={updateInfluencer} />}
@@ -1209,6 +1226,7 @@ function CreatorDatabase({ state, month, filter, onClearFilter }: { state: AppSt
     if (sort.key === "platform") result = compareText(primaryPlatform(a), primaryPlatform(b)) || compareText(a.plannedPublishDate, b.plannedPublishDate) || compareText(a.influencerName, b.influencerName);
     if (sort.key === "city") result = compareText(influencerA?.city, influencerB?.city) || compareText(influencerA?.type, influencerB?.type) || compareBase(a, b);
     if (sort.key === "status") result = (statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)) || compareBase(a, b);
+    if (sort.key === "paymentStatus") result = compareText(a.paymentStatus, b.paymentStatus) || compareBase(a, b);
     if (sort.key === "intent") result = compareText(a.cooperationIntent, b.cooperationIntent) || compareBase(a, b);
     if (sort.key === "brandResult") result = compareText(a.brandResult, b.brandResult) || compareBase(a, b);
     if (sort.key === "rejectReason") result = compareBlankLast(a.influencerRejectReason || a.brandRejectReason, b.influencerRejectReason || b.brandRejectReason) || compareBase(a, b);
@@ -1226,12 +1244,12 @@ function CreatorDatabase({ state, month, filter, onClearFilter }: { state: AppSt
       {filter && <p className="mb-4 rounded-xl border border-[#f8c8ab] bg-[#fee8d9] p-3 text-xs text-[#9a3c0f]">当前筛选：{filter.title} = {filter.value}</p>}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
-            <thead className="bg-[#FAFAFC] text-xs text-[#757A84]"><tr><SortableTh label="达人" sortKey="name" sort={sort} onSort={requestSort} /><SortableTh label="平台账号" sortKey="platform" sort={sort} onSort={requestSort} /><SortableTh label="达人类型/城市" sortKey="city" sort={sort} onSort={requestSort} /><SortableTh label="合作节点" sortKey="status" sort={sort} onSort={requestSort} /><SortableTh label="合作意向" sortKey="intent" sort={sort} onSort={requestSort} /><SortableTh label="提报结果" sortKey="brandResult" sort={sort} onSort={requestSort} /><SortableTh label="拒绝原因" sortKey="rejectReason" sort={sort} onSort={requestSort} /><SortableTh label="负责人" sortKey="owner" sort={sort} onSort={requestSort} /><SortableTh label="费用" sortKey="fee" sort={sort} onSort={requestSort} initialDirection="desc" /></tr></thead>
+          <table className="w-full min-w-[1240px] text-left text-sm">
+            <thead className="bg-[#FAFAFC] text-xs text-[#757A84]"><tr><SortableTh label="达人" sortKey="name" sort={sort} onSort={requestSort} /><SortableTh label="平台账号" sortKey="platform" sort={sort} onSort={requestSort} /><SortableTh label="达人类型/城市" sortKey="city" sort={sort} onSort={requestSort} /><SortableTh label="合作节点" sortKey="status" sort={sort} onSort={requestSort} /><SortableTh label="付款状态" sortKey="paymentStatus" sort={sort} onSort={requestSort} /><SortableTh label="合作意向" sortKey="intent" sort={sort} onSort={requestSort} /><SortableTh label="提报结果" sortKey="brandResult" sort={sort} onSort={requestSort} /><SortableTh label="拒绝原因" sortKey="rejectReason" sort={sort} onSort={requestSort} /><SortableTh label="负责人" sortKey="owner" sort={sort} onSort={requestSort} /><SortableTh label="费用" sortKey="fee" sort={sort} onSort={requestSort} initialDirection="desc" /></tr></thead>
             <tbody>{sortedItems.map((item) => {
               const influencer = influencerMap.get(item.influencerId);
               const accounts = influencer ? accountList(influencer) : [];
-              return <tr key={item.id} className="border-t border-[#ead8cd] align-top hover:bg-[#fffaf6]"><td className="px-5 py-4"><div className="font-medium">{item.influencerName}</div><div className="mt-1 text-xs text-[#7b6258]">{item.plannedPublishDate}</div></td><td className="px-5 py-4"><div className="space-y-1">{accounts.length ? accounts.map((account) => <a key={account.id} href={account.url || profileSearchUrl(account.platform, account.handle)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-[#1d4ed8] hover:underline"><span className={`tag ${toneFor(account.platform)}`}>{account.platform}</span>{account.handle || "未填写账号"}<IconExternalLink size={12} /></a>) : <span className="text-xs text-[#7b6258]">暂无账号</span>}</div></td><td className="px-5 py-4"><div>{influencer?.type || "未建档"}</div><div className="mt-1 text-xs text-[#7b6258]">{influencer?.city || "未填写"}</div></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.status)}`}>{item.status}</span></td><td className="px-5 py-4">{item.cooperationIntent}</td><td className="px-5 py-4">{item.brandResult}</td><td className="px-5 py-4 text-xs text-[#7b6258]">{item.influencerRejectReason || item.brandRejectReason || "—"}</td><td className="px-5 py-4">{item.owner}</td><td className="px-5 py-4 font-medium">{money(item.feeCents)}</td></tr>;
+              return <tr key={item.id} className="border-t border-[#ead8cd] align-top hover:bg-[#fffaf6]"><td className="px-5 py-4"><div className="font-medium">{item.influencerName}</div><div className="mt-1 text-xs text-[#7b6258]">{item.plannedPublishDate}</div></td><td className="px-5 py-4"><div className="space-y-1">{accounts.length ? accounts.map((account) => <a key={account.id} href={account.url || profileSearchUrl(account.platform, account.handle)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-[#1d4ed8] hover:underline"><span className={`tag ${platformTagClass(account.platform)}`}>{account.platform}</span>{account.handle || "未填写账号"}<IconExternalLink size={12} /></a>) : <span className="text-xs text-[#7b6258]">暂无账号</span>}</div></td><td className="px-5 py-4"><div>{influencer?.type || "未建档"}</div><div className="mt-1 text-xs text-[#7b6258]">{influencer?.city || "未填写"}</div></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.status)}`}>{item.status}</span></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.paymentStatus)}`}>{item.paymentStatus}</span></td><td className="px-5 py-4">{item.cooperationIntent}</td><td className="px-5 py-4">{item.brandResult}</td><td className="px-5 py-4 text-xs text-[#7b6258]">{item.influencerRejectReason || item.brandRejectReason || "—"}</td><td className="px-5 py-4">{item.owner}</td><td className="px-5 py-4 font-medium">{money(item.feeCents)}</td></tr>;
             })}</tbody>
           </table>
         </div>
@@ -1240,9 +1258,132 @@ function CreatorDatabase({ state, month, filter, onClearFilter }: { state: AppSt
   );
 }
 
+const legalHolidayLabels: Record<string, string> = {
+  "2026-01-01": "元旦",
+  "2026-01-02": "元旦",
+  "2026-01-03": "元旦",
+  "2026-02-15": "春节",
+  "2026-02-16": "春节",
+  "2026-02-17": "春节",
+  "2026-02-18": "春节",
+  "2026-02-19": "春节",
+  "2026-02-20": "春节",
+  "2026-02-21": "春节",
+  "2026-02-22": "春节",
+  "2026-02-23": "春节",
+  "2026-04-04": "清明节",
+  "2026-04-05": "清明节",
+  "2026-04-06": "清明节",
+  "2026-05-01": "劳动节",
+  "2026-05-02": "劳动节",
+  "2026-05-03": "劳动节",
+  "2026-05-04": "劳动节",
+  "2026-05-05": "劳动节",
+  "2026-06-19": "端午节",
+  "2026-06-20": "端午节",
+  "2026-06-21": "端午节",
+  "2026-09-25": "中秋节",
+  "2026-09-26": "中秋节",
+  "2026-09-27": "中秋节",
+  "2026-10-01": "国庆节",
+  "2026-10-02": "国庆节",
+  "2026-10-03": "国庆节",
+  "2026-10-04": "国庆节",
+  "2026-10-05": "国庆节",
+  "2026-10-06": "国庆节",
+  "2026-10-07": "国庆节",
+};
+const adjustedWorkdays = new Set(["2026-01-04", "2026-02-14", "2026-02-28", "2026-05-09", "2026-09-20", "2026-10-10"]);
+
+function calendarDateKey(year: number, monthIndex: number, day: number) {
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function Calendar({ state, month }: { state: AppState; month: string }) {
   const items = state.collaborations.filter((c) => c.month === month);
-  return <div><SectionTitle title="达人档期日历" action={<span className="text-sm text-[#687282]">发布与审核节点</span>} /><div className="card overflow-x-auto p-4"><div className="grid min-w-[760px] grid-cols-7 gap-px overflow-hidden rounded-xl bg-[#cbd5e1]">{["周一", "周二", "周三", "周四", "周五", "周六", "周日"].map((d) => <div className="bg-[#f1f5f9] p-3 text-center text-xs text-[#475569]" key={d}>{d}</div>)}{Array.from({ length: 30 }, (_, i) => i + 1).map((day) => { const events = items.filter((i) => Number(i.plannedPublishDate.slice(-2)) === day); return <div key={day} className="min-h-28 bg-white p-2"><span className="text-xs text-[#687282]">{day}</span><div className="mt-2 space-y-1">{events.slice(0, 3).map((e) => <div key={e.id} className={`truncate rounded-md border px-2 py-1 text-xs ${toneFor(e.status)}`}>{e.influencerName} · {e.status}</div>)}</div></div>; })}</div></div></div>;
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const firstDay = new Date(year, monthIndex, 1).getDay();
+  const startOffset = (firstDay + 6) % 7;
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+  const weekDays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  return (
+    <div>
+      <SectionTitle title="达人档期日历" action={<span className="text-sm text-[#687282]">发布与审核节点</span>} />
+      <div className="card overflow-x-auto p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-[#687282]">
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#f0f7ff] px-2.5 py-1 text-[#2563eb]"><span className="h-2 w-2 rounded-full bg-[#60a5fa]" />周末</span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#fff4e5] px-2.5 py-1 text-[#c05621]"><span className="h-2 w-2 rounded-full bg-[#f59e0b]" />法定假期</span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#64748b]"><span className="h-2 w-2 rounded-full bg-[#94a3b8]" />调休上班</span>
+        </div>
+        <div className="grid min-w-[860px] grid-cols-7 gap-px overflow-hidden rounded-xl bg-[#cbd5e1]">
+          {weekDays.map((day, index) => <div className={`p-3 text-center text-xs font-medium ${index >= 5 ? "bg-[#eaf6ff] text-[#2563eb]" : "bg-[#f1f5f9] text-[#475569]"}`} key={day}>{day}</div>)}
+          {Array.from({ length: totalCells }, (_, index) => {
+            const day = index - startOffset + 1;
+            if (day < 1 || day > daysInMonth) return <div key={`empty-${index}`} className="min-h-28 bg-[#eef2f7]" />;
+            const key = calendarDateKey(year, monthIndex, day);
+            const date = new Date(year, monthIndex, day);
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const holiday = legalHolidayLabels[key];
+            const isAdjusted = adjustedWorkdays.has(key);
+            const dayEvents = items.filter((item) => Number(item.plannedPublishDate.slice(-2)) === day);
+            const cellClass = holiday
+              ? "bg-[#fffaf2]"
+              : isWeekend && !isAdjusted
+                ? "bg-[#f5fbff]"
+                : "bg-white";
+            return (
+              <div key={key} className={`min-h-32 p-2 ${cellClass}`}>
+                <div className="mb-2 flex min-h-5 items-center justify-between gap-2">
+                  <span className={`text-xs font-medium ${holiday ? "text-[#c05621]" : isWeekend && !isAdjusted ? "text-[#2563eb]" : "text-[#687282]"}`}>{day}</span>
+                  {holiday ? <span className="calendar-day-badge calendar-day-badge-holiday">{holiday}</span> : isAdjusted ? <span className="calendar-day-badge calendar-day-badge-adjusted">调休</span> : isWeekend ? <span className="calendar-day-badge calendar-day-badge-weekend">周末</span> : null}
+                </div>
+                <div className="space-y-1">
+                  {dayEvents.slice(0, 3).map((event) => <div key={event.id} className={`truncate rounded-md border px-2 py-1 text-xs ${toneFor(event.status)}`}>{event.influencerName} · {event.status}</div>)}
+                  {dayEvents.length > 3 ? <div className="text-xs text-[#687282]">还有 {dayEvents.length - 3} 项</div> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShippingSummaryPage({ state, month }: { state: AppState; month: string }) {
+  const year = month.slice(0, 4);
+  const items = state.collaborations.filter((c) => c.month.startsWith(`${year}-`)).map(normalizeShippingCollaboration);
+  const shippingSummary = buildShippingProductSummary(items);
+  const signedShipments = shippingSummary.rows.reduce((sum, row) => sum + row.signed, 0);
+  const recoveredQuantity = shippingSummary.shipped.filter((item) => item.shippingStatus === "已签收").reduce((sum, item) => sum + (item.sampleQuantity || 1), 0);
+  const totalCostCents = shippingSummary.shipped.reduce((sum, item) => sum + item.feeCents, 0);
+  const recoveryRate = shippingSummary.totalQuantity ? Math.round(recoveredQuantity / shippingSummary.totalQuantity * 100) : 0;
+  return (
+    <div>
+      <SectionTitle title="全年样品汇总" action={<span className="text-sm text-[#6f5d55]">按产品编码统计 {year} 年已寄出和已签收记录</span>} />
+      <section className="mb-4 grid gap-3 md:grid-cols-4">
+        <div className="card p-4"><p className="text-xs text-[#7b6258]">全年邮寄数量统计</p><strong className="mt-2 block text-2xl text-[#f06d22]">{shippingSummary.totalShipments}</strong><span className="mt-1 block text-xs text-[#9aa3af]">已寄出单数</span></div>
+        <div className="card p-4"><p className="text-xs text-[#7b6258]">全年邮寄总数量</p><strong className="mt-2 block text-2xl text-[#2185a6]">{shippingSummary.totalQuantity}</strong><span className="mt-1 block text-xs text-[#9aa3af]">样品产品件数</span></div>
+        <div className="card p-4"><p className="text-xs text-[#7b6258]">成本统计</p><strong className="mt-2 block text-2xl text-[#7C6CEF]">{money(totalCostCents)}</strong><span className="mt-1 block text-xs text-[#9aa3af]">已寄出样品对应费用</span></div>
+        <div className="card p-4"><p className="text-xs text-[#7b6258]">回收统计</p><strong className="mt-2 block text-2xl text-[#c75bbd]">{recoveredQuantity}</strong><span className="mt-1 block text-xs text-[#9aa3af]">已签收样品数 · {recoveryRate}%</span></div>
+      </section>
+      <section className="card overflow-hidden">
+        <div className="border-b border-[#ead8cd] px-5 py-4">
+          <h3 className="font-medium">按产品编码汇总</h3>
+          <p className="mt-1 text-xs text-[#7b6258]">每行聚合 {year} 年同一产品编码下的邮寄单、数量、签收状态、寄出人和快递单号；全年签收单数 {signedShipments}。</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="bg-[#fbf6f2] text-xs text-[#7b6258]"><tr><th className="px-5 py-3">产品编码</th><th className="px-5 py-3">样品内容</th><th className="px-5 py-3">寄出人</th><th className="px-5 py-3">邮寄单数</th><th className="px-5 py-3">产品数量</th><th className="px-5 py-3">签收/在途/异常</th><th className="px-5 py-3">快递单号</th></tr></thead>
+            <tbody>{shippingSummary.rows.length ? shippingSummary.rows.map((row) => <tr key={row.code} className="border-t border-[#ead8cd]"><td className="px-5 py-4 font-medium">{row.code}</td><td className="px-5 py-4">{row.content}</td><td className="px-5 py-4">{row.senders.join("、") || "未填写"}</td><td className="px-5 py-4">{row.shipments}</td><td className="px-5 py-4">{row.quantity}</td><td className="px-5 py-4 text-xs text-[#6f5d55]">签收 {row.signed} / 在途 {row.inTransit} / 异常 {row.exception}</td><td className="max-w-sm truncate px-5 py-4 text-xs text-[#6f5d55]">{row.trackingNos.join("、") || "未填写"}</td></tr>) : <tr><td colSpan={7} className="px-5 py-10 text-center text-sm text-[#7b6258]">当前年份还没有已寄出的样品。</td></tr>}</tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function Shipping({ state, setState, month }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; month: string }) {
@@ -1275,10 +1416,11 @@ function Shipping({ state, setState, month }: { state: AppState; setState: React
       最新轨迹: item.shipmentEvents?.at(-1)?.description || "",
     })));
     const summary = workbook.addWorksheet("产品汇总");
-    summary.columns = ["产品编码", "样品内容", "邮寄单数", "产品数量", "已签收单数", "在途单数", "异常单数", "关联快递单号"].map((header) => ({ header, key: header, width: 20 }));
+    summary.columns = ["产品编码", "样品内容", "寄出人", "邮寄单数", "产品数量", "已签收单数", "在途单数", "异常单数", "关联快递单号"].map((header) => ({ header, key: header, width: 20 }));
     summary.addRows(shippingSummary.rows.map((row) => ({
       产品编码: row.code,
       样品内容: row.content,
+      寄出人: row.senders.join("、"),
       邮寄单数: row.shipments,
       产品数量: row.quantity,
       已签收单数: row.signed,
@@ -1410,15 +1552,6 @@ function Shipping({ state, setState, month }: { state: AppState; setState: React
         <div className="card p-4"><p className="text-xs text-[#7b6258]">产品总数量</p><strong className="mt-2 block text-2xl text-[#2185a6]">{shippingSummary.totalQuantity}</strong></div>
         <div className="card p-4"><p className="text-xs text-[#7b6258]">样品种类</p><strong className="mt-2 block text-2xl text-[#87933c]">{shippingSummary.sampleKinds}</strong></div>
         <div className="card p-4"><p className="text-xs text-[#7b6258]">产品编码数</p><strong className="mt-2 block text-2xl text-[#c75bbd]">{shippingSummary.productCodeCount}</strong></div>
-      </section>
-      <section className="card mb-4 overflow-hidden">
-        <div className="border-b border-[#ead8cd] px-4 py-3"><h3 className="font-medium">物品邮寄汇总</h3><p className="mt-1 text-xs text-[#7b6258]">按产品编码统计已寄出和已签收记录</p></div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-[#fbf6f2] text-xs text-[#7b6258]"><tr><th className="px-4 py-3">产品编码</th><th className="px-4 py-3">样品内容</th><th className="px-4 py-3">邮寄单数</th><th className="px-4 py-3">产品数量</th><th className="px-4 py-3">签收/在途/异常</th><th className="px-4 py-3">快递单号</th></tr></thead>
-            <tbody>{shippingSummary.rows.length ? shippingSummary.rows.map((row) => <tr key={row.code} className="border-t border-[#ead8cd]"><td className="px-4 py-3 font-medium">{row.code}</td><td className="px-4 py-3">{row.content}</td><td className="px-4 py-3">{row.shipments}</td><td className="px-4 py-3">{row.quantity}</td><td className="px-4 py-3 text-xs text-[#6f5d55]">签收 {row.signed} / 在途 {row.inTransit} / 异常 {row.exception}</td><td className="max-w-xs truncate px-4 py-3 text-xs text-[#6f5d55]">{row.trackingNos.join("、") || "未填写"}</td></tr>) : <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[#7b6258]">当前月份还没有已寄出的样品。</td></tr>}</tbody>
-          </table>
-        </div>
       </section>
       <div className="grid gap-4 lg:grid-cols-3">
         {groups.map((group) => {
