@@ -2,17 +2,102 @@
 
 import ReactECharts from "echarts-for-react";
 
-const colors = ["#6F4EF6", "#20C5E8", "#32C59D", "#F6B84A", "#F0525F"];
-const chartText = "#1D2638";
-const chartMuted = "#667085";
-const chartTertiary = "#98A2B3";
-const chartGrid = "rgba(152,162,179,.16)";
-const tooltipShadow = "border-radius:14px;box-shadow:0 10px 30px rgba(31,42,68,.08),0 2px 8px rgba(31,42,68,.04);";
+const colors = ["#161816", "#B8FF3D", "#B8BDC5", "#5D82D9", "#EC6A6A"];
+const chartText = "#111311";
+const chartMuted = "#6F747C";
+const chartTertiary = "#9DA3AC";
+const chartGrid = "#ECEEF1";
+const tooltipShadow = "border-radius:10px;box-shadow:0 1px 2px rgba(17,24,39,.03),0 8px 24px rgba(17,24,39,.08);";
 
 export function PieChart({ data, height = 260, onItemClick }: { data: { name: string; value: number }[]; height?: number; onItemClick?: (name: string) => void }) {
-  return <ReactECharts notMerge style={{ height, cursor: onItemClick ? "pointer" : "default" }} onEvents={onItemClick ? { click: (params: { name?: string }) => params.name && onItemClick(params.name), legendselectchanged: (params: { name?: string }) => params.name && onItemClick(params.name) } : undefined} option={{ color: colors, backgroundColor: "transparent", tooltip: { trigger: "item", backgroundColor: "#FFFFFF", borderColor: "#E7ECF1", borderWidth: 1, padding: [10, 12], textStyle: { color: chartText, fontSize: 12 }, extraCssText: tooltipShadow }, legend: { top: 0, type: "scroll", icon: "roundRect", itemWidth: 16, itemHeight: 6, textStyle: { color: chartMuted, fontSize: 11 } }, series: [{ type: "pie", radius: ["42%", "66%"], center: ["50%", "58%"], itemStyle: { borderColor: "#FFFFFF", borderWidth: 4, borderRadius: 6 }, label: { color: chartMuted, formatter: "{b}\n{c} ({d}%)", fontSize: 11 }, labelLine: { lineStyle: { color: chartGrid } }, data }] }} />;
+  return (
+    <ReactECharts
+      notMerge
+      style={{ height, cursor: onItemClick ? "pointer" : "default" }}
+      onEvents={onItemClick ? {
+        click: (params: { name?: string }) => params.name && onItemClick(params.name),
+        legendselectchanged: (params: { name?: string }) => params.name && onItemClick(params.name),
+      } : undefined}
+      option={{
+        aria: { enabled: true, decal: { show: true } },
+        color: colors,
+        backgroundColor: "transparent",
+        tooltip: {
+          trigger: "item",
+          backgroundColor: "#FFFFFF",
+          borderColor: "#E5E8EC",
+          borderWidth: 1,
+          padding: [10, 12],
+          textStyle: { color: chartText, fontSize: 12 },
+          extraCssText: tooltipShadow,
+        },
+        legend: {
+          top: 0,
+          type: "scroll",
+          icon: "roundRect",
+          itemWidth: 16,
+          itemHeight: 6,
+          textStyle: { color: chartMuted, fontSize: 11 },
+        },
+        series: [{
+          type: "pie",
+          radius: ["44%", "68%"],
+          center: ["50%", "58%"],
+          itemStyle: { borderColor: "#FFFFFF", borderWidth: 4, borderRadius: 5 },
+          label: { color: chartMuted, formatter: "{b}\n{c} ({d}%)", fontSize: 11 },
+          labelLine: { lineStyle: { color: chartGrid } },
+          data,
+        }],
+      }}
+    />
+  );
 }
 
 export function BarChart({ data, height = 360 }: { data: { name: string; value: number }[]; height?: number }) {
-  return <ReactECharts notMerge style={{ height }} option={{ color: colors, backgroundColor: "transparent", grid: { left: 112, right: 26, top: 18, bottom: 26 }, tooltip: { trigger: "axis", backgroundColor: "#FFFFFF", borderColor: "#E7ECF1", borderWidth: 1, padding: [10, 12], textStyle: { color: chartText, fontSize: 12 }, extraCssText: tooltipShadow }, xAxis: { type: "value", axisLabel: { color: chartTertiary, fontSize: 11 }, axisLine: { lineStyle: { color: chartGrid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: chartGrid } } }, yAxis: { type: "category", data: data.map((d) => d.name), axisLabel: { width: 94, overflow: "truncate", color: chartTertiary, fontSize: 11 }, axisLine: { lineStyle: { color: chartGrid } }, axisTick: { show: false } }, series: [{ type: "bar", data: data.map((d) => d.value), barWidth: 18, label: { show: true, position: "right", color: chartMuted }, itemStyle: { borderRadius: [0, 9, 9, 0], color: (params: { dataIndex: number }) => colors[params.dataIndex % Math.min(colors.length, 3)] } }] }} />;
+  return (
+    <ReactECharts
+      notMerge
+      style={{ height }}
+      option={{
+        aria: { enabled: true, decal: { show: true } },
+        color: colors,
+        backgroundColor: "transparent",
+        grid: { left: 112, right: 30, top: 18, bottom: 26 },
+        tooltip: {
+          trigger: "axis",
+          backgroundColor: "#FFFFFF",
+          borderColor: "#E5E8EC",
+          borderWidth: 1,
+          padding: [10, 12],
+          textStyle: { color: chartText, fontSize: 12 },
+          extraCssText: tooltipShadow,
+          axisPointer: { type: "shadow", shadowStyle: { color: "rgba(17,19,17,.035)" } },
+        },
+        xAxis: {
+          type: "value",
+          axisLabel: { color: chartTertiary, fontSize: 11 },
+          axisLine: { lineStyle: { color: chartGrid } },
+          axisTick: { show: false },
+          splitLine: { lineStyle: { color: chartGrid } },
+        },
+        yAxis: {
+          type: "category",
+          data: data.map((item) => item.name),
+          axisLabel: { width: 94, overflow: "truncate", color: chartMuted, fontSize: 11 },
+          axisLine: { show: false },
+          axisTick: { show: false },
+        },
+        series: [{
+          type: "bar",
+          data: data.map((item) => item.value),
+          barWidth: 16,
+          label: { show: true, position: "right", color: chartMuted, fontSize: 11 },
+          itemStyle: {
+            borderRadius: [0, 8, 8, 0],
+            color: (params: { dataIndex: number }) => params.dataIndex === 0 ? colors[1] : params.dataIndex === 1 ? colors[0] : colors[2],
+          },
+        }],
+      }}
+    />
+  );
 }

@@ -11,6 +11,21 @@ npm.cmd run dev
 
 打开 `http://localhost:3000`。未配置钉钉登录时，系统保留浏览器本地演示数据和演示登录。
 
+## UI 设计与部署
+
+- UI 规范：[docs/UI_DESIGN_SYSTEM.md](./docs/UI_DESIGN_SYSTEM.md)
+- AI 部署执行文档：[AI_DEPLOYMENT.md](./AI_DEPLOYMENT.md)
+- 统一主题覆盖层：`src/app/design-system.css`
+
+设计系统采用浅蓝灰画布、白色卡片、黑色高对比文字和单一荧光黄绿色强调色。部署前必须运行：
+
+```bash
+npm ci
+npm run lint
+npm test
+npm run build
+```
+
 ## 本地导出目录
 
 在右上角“系统设置”里填写“导出表格保存目录”，例如 `E:\imi-exports`。填写后，达人资源库和样品邮寄统计导出的 Excel 会保存到运行本应用的这台电脑目录；留空时仍使用浏览器下载。
