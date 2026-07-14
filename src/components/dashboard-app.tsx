@@ -16,10 +16,12 @@ import {
   IconExternalLink,
   IconFileAnalytics,
   IconMenu2,
+  IconMoon,
   IconPencil,
   IconRefresh,
   IconSearch,
   IconSettings,
+  IconSun,
   IconTrash,
   IconTruckDelivery,
   IconUpload,
@@ -41,6 +43,7 @@ type DrilldownFilter = { field: DrilldownField; value: string; title: string };
 type CreatorDatabaseSortKey = "name" | "platform" | "city" | "status" | "paymentStatus" | "intent" | "brandResult" | "rejectReason" | "owner" | "fee";
 type SortDirection = "asc" | "desc";
 type CreatorDatabaseSort = { key: CreatorDatabaseSortKey; direction: SortDirection };
+type ColorMode = "light" | "dark";
 type ShippingApiResponse = {
   provider?: "mock" | "kuaidi100" | "kdniao";
   mode?: "manual" | "realtime";
@@ -52,6 +55,7 @@ type ShippingApiResponse = {
 };
 
 const STORAGE_KEY = "creator-ops-state-v2";
+const COLOR_MODE_STORAGE_KEY = "imi-dashboard-color-mode";
 const statusOrder: CollaborationStatus[] = ["样品寄送中", "达人初稿脚本中", "初稿脚本审核中", "达人修改中", "品牌最终审核中", "待达人发布", "笔记已发布", "合作延期", "合作已完成"];
 const nav: { id: View; label: string; icon: typeof IconDashboard }[] = [
   { id: "overview", label: "达人管理总视图", icon: IconDashboard },
@@ -329,6 +333,23 @@ export function DashboardApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [drilldownFilter, setDrilldownFilter] = useState<DrilldownFilter | null>(null);
+  const [colorMode, setColorMode] = useState<ColorMode>(() => {
+    if (typeof window === "undefined") return "light";
+    const savedMode = localStorage.getItem(COLOR_MODE_STORAGE_KEY) === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = savedMode;
+    return savedMode;
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = colorMode;
+    localStorage.setItem(COLOR_MODE_STORAGE_KEY, colorMode);
+  }, [colorMode]);
+
+  const toggleColorMode = () => {
+    const nextMode: ColorMode = colorMode === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = nextMode;
+    setColorMode(nextMode);
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -377,7 +398,7 @@ export function DashboardApp() {
   const monthOptions = getAvailableMonths(state, month);
 
   return (
-    <div className="dashboard-shell min-h-screen bg-[#f5f5f7]">
+    <div className="dashboard-shell min-h-screen bg-[#f5f5f7]" data-theme={colorMode}>
       <aside className={`dashboard-sidebar fixed inset-y-0 left-0 z-40 bg-[#30313a] text-white transition-all duration-200 ${collapsed ? "is-collapsed w-[82px]" : "is-expanded w-[286px]"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#eef0f2] text-[#30313a]"><IconBrandCampaignmonitor size={23} /></div>
@@ -402,11 +423,14 @@ export function DashboardApp() {
           <div><h1 className="text-lg font-semibold md:text-xl">{nav.find((n) => n.id === view)?.label}</h1><p className="hidden text-xs text-[#7b6258] sm:block">集中管理达人合作进度、费用与交付</p></div>
           <div className="ml-auto flex items-center gap-2">
             <select className="control max-w-32" value={month} onChange={(e) => setMonth(e.target.value)}>{monthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
+            <button className="theme-toggle grid h-10 w-10 place-items-center rounded-full" onClick={toggleColorMode} aria-label={colorMode === "light" ? "切换到深色模式" : "切换到浅色模式"} title={colorMode === "light" ? "深色模式" : "浅色模式"}>
+              {colorMode === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
+            </button>
             <button className="hidden h-10 w-10 place-items-center rounded-full bg-white sm:grid" onClick={() => setShowSettings(true)} aria-label="设置"><IconSettings size={19} /></button>
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#593229] text-sm font-semibold text-white">{state.currentUser.name.slice(0, 1)}</div>
           </div>
         </header>
-        <div className="dashboard-content p-4 md:p-8">{content}</div>
+        <div className="dashboard-content p-4 md:p-8" key={colorMode}>{content}</div>
       </main>
 
       {sidebarOpen && <button aria-label="关闭导航" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-black/40 md:hidden" />}
@@ -1192,7 +1216,7 @@ function Influencers({ state, setState, onAdd }: { state: AppState; setState: Re
         <div className="overflow-x-auto"><table className="w-full min-w-[1040px] text-left text-sm"><thead className="bg-[#f8fafc] text-xs text-[#687282]"><tr><th className="px-5 py-3 font-medium">达人</th><th className="px-5 py-3 font-medium">多平台账号</th><th className="px-5 py-3 font-medium">类型/城市</th><th className="px-5 py-3 font-medium"><button type="button" onClick={refreshVisibleFollowers} disabled={refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 hover:bg-white hover:text-[#111827]" title="点击刷新当前筛选结果的粉丝数"><IconRefresh size={13} />{refreshing === "all" ? "刷新中" : "总粉丝"}</button></th><th className="px-5 py-3 font-medium">参考报价</th><th className="px-5 py-3 font-medium">标签</th><th className="px-5 py-3 font-medium">联系方式</th><th className="px-3 py-3 text-center font-medium">操作</th></tr></thead><tbody>{filtered.map((i) => {
           const accounts = accountList(i);
           const totalFollowers = accounts.reduce((sum, a) => sum + a.followers, 0);
-          return <tr key={i.id} className="border-t border-[#e5e7eb] align-top hover:bg-white"><td className="px-5 py-4"><div className="font-medium">{i.name}</div><div className="text-xs text-[#7b8492]">{accounts.length} 个平台账号</div></td><td className="px-5 py-4"><div className="space-y-2">{accounts.map((a) => <div key={a.id} className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2"><div className="flex flex-wrap items-center gap-2"><span className={`tag ${platformTagClass(a.platform)}`}>{a.platform}</span><a href={a.url || profileSearchUrl(a.platform, a.handle)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-[#1d4ed8] hover:underline">{a.handle || "未填写账号"}<IconExternalLink size={13} /></a></div><p className="mt-1 text-xs text-[#687282]">粉丝 {formatFollowers(a.followers)}{a.lastSyncedAt ? ` · ${new Date(a.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })}` : ""}</p></div>)}</div></td><td className="px-5 py-4"><div>{i.type}</div><div className="mt-1 text-xs text-[#687282]">{i.city}</div></td><td className="px-5 py-4"><button type="button" onClick={() => refreshInfluencerFollowers(i)} disabled={refreshing === i.id || refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-[#f1f5f9] disabled:opacity-60" title="点击刷新该达人所有平台粉丝数"><IconRefresh size={13} className={refreshing === i.id ? "animate-spin" : ""} />{refreshing === i.id ? "刷新中" : formatFollowers(totalFollowers)}</button></td><td className="px-5 py-4 font-medium">{money(i.quoteCents)}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-1">{i.tags.slice(0, 3).map((t) => <span className={`tag ${toneFor(t)}`} key={t}>{t}</span>)}</div></td><td className="px-5 py-4">{i.phone}</td><td className="px-3 py-4"><div className="flex justify-center gap-1"><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e5e7eb] text-[#475569] hover:bg-[#f8fafc] hover:text-[#111827]" onClick={() => setEditing(i)} title="编辑" aria-label={`编辑 ${i.name}`}><IconPencil size={15} /></button><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#fee2e2] text-[#be123c] hover:bg-[#fff1f2]" onClick={() => deleteInfluencer(i.id)} title="删除" aria-label={`删除 ${i.name}`}><IconTrash size={15} /></button></div></td></tr>;
+          return <tr key={i.id} className="border-t border-[#e5e7eb] align-top hover:bg-white"><td className="px-5 py-4"><div className="font-medium">{i.name}</div><div className="text-xs text-[#7b8492]">{accounts.length} 个平台账号</div></td><td className="px-5 py-4"><div className="space-y-2">{accounts.map((a) => <div key={a.id} className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2"><div className="flex flex-wrap items-center gap-2"><span className={`tag ${platformTagClass(a.platform)}`}>{a.platform}</span><a href={a.url || profileSearchUrl(a.platform, a.handle)} target="_blank" rel="noreferrer" className="account-link inline-flex items-center gap-1 font-medium hover:underline">{a.handle || "未填写账号"}<IconExternalLink size={13} /></a></div><p className="mt-1 text-xs text-[#687282]">粉丝 {formatFollowers(a.followers)}{a.lastSyncedAt ? ` · ${new Date(a.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })}` : ""}</p></div>)}</div></td><td className="px-5 py-4"><div>{i.type}</div><div className="mt-1 text-xs text-[#687282]">{i.city}</div></td><td className="px-5 py-4"><button type="button" onClick={() => refreshInfluencerFollowers(i)} disabled={refreshing === i.id || refreshing === "all"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-[#f1f5f9] disabled:opacity-60" title="点击刷新该达人所有平台粉丝数"><IconRefresh size={13} className={refreshing === i.id ? "animate-spin" : ""} />{refreshing === i.id ? "刷新中" : formatFollowers(totalFollowers)}</button></td><td className="px-5 py-4 font-medium">{money(i.quoteCents)}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-1">{i.tags.slice(0, 3).map((t) => <span className={`tag ${toneFor(t)}`} key={t}>{t}</span>)}</div></td><td className="px-5 py-4">{i.phone}</td><td className="px-3 py-4"><div className="flex justify-center gap-1"><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e5e7eb] text-[#475569] hover:bg-[#f8fafc] hover:text-[#111827]" onClick={() => setEditing(i)} title="编辑" aria-label={`编辑 ${i.name}`}><IconPencil size={15} /></button><button className="grid h-8 w-8 place-items-center rounded-lg border border-[#fee2e2] text-[#be123c] hover:bg-[#fff1f2]" onClick={() => deleteInfluencer(i.id)} title="删除" aria-label={`删除 ${i.name}`}><IconTrash size={15} /></button></div></td></tr>;
         })}</tbody></table></div>
       </div>
       {editing && <InfluencerForm title="编辑达人" initial={editing} onClose={() => setEditing(null)} onSave={updateInfluencer} />}
@@ -1249,7 +1273,7 @@ function CreatorDatabase({ state, month, filter, onClearFilter }: { state: AppSt
             <tbody>{sortedItems.map((item) => {
               const influencer = influencerMap.get(item.influencerId);
               const accounts = influencer ? accountList(influencer) : [];
-              return <tr key={item.id} className="border-t border-[#ead8cd] align-top hover:bg-[#fffaf6]"><td className="px-5 py-4"><div className="font-medium">{item.influencerName}</div><div className="mt-1 text-xs text-[#7b6258]">{item.plannedPublishDate}</div></td><td className="px-5 py-4"><div className="space-y-1">{accounts.length ? accounts.map((account) => <a key={account.id} href={account.url || profileSearchUrl(account.platform, account.handle)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-[#1d4ed8] hover:underline"><span className={`tag ${platformTagClass(account.platform)}`}>{account.platform}</span>{account.handle || "未填写账号"}<IconExternalLink size={12} /></a>) : <span className="text-xs text-[#7b6258]">暂无账号</span>}</div></td><td className="px-5 py-4"><div>{influencer?.type || "未建档"}</div><div className="mt-1 text-xs text-[#7b6258]">{influencer?.city || "未填写"}</div></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.status)}`}>{item.status}</span></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.paymentStatus)}`}>{item.paymentStatus}</span></td><td className="px-5 py-4">{item.cooperationIntent}</td><td className="px-5 py-4">{item.brandResult}</td><td className="px-5 py-4 text-xs text-[#7b6258]">{item.influencerRejectReason || item.brandRejectReason || "—"}</td><td className="px-5 py-4">{item.owner}</td><td className="px-5 py-4 font-medium">{money(item.feeCents)}</td></tr>;
+              return <tr key={item.id} className="border-t border-[#ead8cd] align-top hover:bg-[#fffaf6]"><td className="px-5 py-4"><div className="font-medium">{item.influencerName}</div><div className="mt-1 text-xs text-[#7b6258]">{item.plannedPublishDate}</div></td><td className="px-5 py-4"><div className="space-y-1">{accounts.length ? accounts.map((account) => <a key={account.id} href={account.url || profileSearchUrl(account.platform, account.handle)} target="_blank" rel="noreferrer" className="account-link flex items-center gap-1 text-xs font-medium hover:underline"><span className={`tag ${platformTagClass(account.platform)}`}>{account.platform}</span>{account.handle || "未填写账号"}<IconExternalLink size={12} /></a>) : <span className="text-xs text-[#7b6258]">暂无账号</span>}</div></td><td className="px-5 py-4"><div>{influencer?.type || "未建档"}</div><div className="mt-1 text-xs text-[#7b6258]">{influencer?.city || "未填写"}</div></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.status)}`}>{item.status}</span></td><td className="px-5 py-4"><span className={`tag ${toneFor(item.paymentStatus)}`}>{item.paymentStatus}</span></td><td className="px-5 py-4">{item.cooperationIntent}</td><td className="px-5 py-4">{item.brandResult}</td><td className="px-5 py-4 text-xs text-[#7b6258]">{item.influencerRejectReason || item.brandRejectReason || "—"}</td><td className="px-5 py-4">{item.owner}</td><td className="px-5 py-4 font-medium">{money(item.feeCents)}</td></tr>;
             })}</tbody>
           </table>
         </div>

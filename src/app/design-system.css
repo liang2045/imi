@@ -70,6 +70,33 @@
   --gradient-secondary: linear-gradient(135deg, #111311 0%, #2b2f2b 100%);
 }
 
+:root[data-theme="dark"] {
+  --bg-canvas: #121417;
+  --bg-canvas-warm: #171a1e;
+  --surface: #1a1e23;
+  --surface-subtle: #22272d;
+  --surface-active: #2a3037;
+
+  --text-primary: #f6f8fa;
+  --text-secondary: #c3c9d1;
+  --text-tertiary: #929aa5;
+  --text-inverse: #101214;
+
+  --border-default: #343b44;
+  --border-strong: #4a535e;
+  --accent: #c6ff58;
+  --accent-bright: #dcff82;
+  --accent-soft: #2c3818;
+  --accent-dark: #10150b;
+
+  --chart-black: #f1f4f2;
+  --chart-gray: #7f8791;
+  --chart-grid: #38414b;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 10px 28px rgba(0, 0, 0, 0.18);
+  --shadow-hover: 0 2px 5px rgba(0, 0, 0, 0.24), 0 14px 32px rgba(0, 0, 0, 0.26);
+  --shadow-focus: 0 0 0 3px rgba(198, 255, 88, 0.3);
+}
+
 html {
   background: var(--bg-canvas);
 }
@@ -79,6 +106,18 @@ body {
   background: var(--bg-canvas) !important;
   font-family: var(--font-geist), "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   font-variant-numeric: tabular-nums;
+}
+
+.theme-toggle {
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-active);
+  border-color: var(--border-strong);
 }
 
 body > div.min-h-screen,
@@ -453,6 +492,77 @@ strong {
   color: #a84545 !important;
   background: #fff1f1 !important;
   border-color: #f3d1d1 !important;
+}
+
+/* Platform identity is intentionally kept separate from collaboration status tags. */
+.tag-platform-xhs {
+  color: #d91f3b !important;
+  background: #fff0f2 !important;
+  border-color: #ffcbd4 !important;
+}
+
+.tag-platform-douyin {
+  color: #171923 !important;
+  background: #f3fbfc !important;
+  border-color: #c7edf0 !important;
+}
+
+.tag-platform-weibo {
+  color: #d83622 !important;
+  background: #fff4e9 !important;
+  border-color: #ffd6b1 !important;
+}
+
+.tag-platform-bilibili {
+  color: #008fcb !important;
+  background: #eaf8ff !important;
+  border-color: #bae8fa !important;
+}
+
+.account-link {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] .tag-platform-xhs {
+  color: #ff95a5 !important;
+  background: #3e2029 !important;
+  border-color: #6b3643 !important;
+}
+
+:root[data-theme="dark"] .tag-platform-douyin {
+  color: #eefcff !important;
+  background: #1d3034 !important;
+  border-color: #36565d !important;
+}
+
+:root[data-theme="dark"] .tag-platform-weibo {
+  color: #ffad7e !important;
+  background: #3a2920 !important;
+  border-color: #694535 !important;
+}
+
+:root[data-theme="dark"] .tag-platform-bilibili {
+  color: #8cd9ff !important;
+  background: #1a303b !important;
+  border-color: #315769 !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#dbeafe]"],
+:root[data-theme="dark"] [class*="bg-[#ebfff8]"] {
+  color: #c5d5ff !important;
+  background: #202b3c !important;
+  border-color: #3b4e6e !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#fee8d9]"],
+:root[data-theme="dark"] [class*="bg-[#fff8e8]"] {
+  color: #ffd196 !important;
+  background: #392d20 !important;
+  border-color: #624b31 !important;
+}
+
+:root[data-theme="dark"] tbody tr:hover {
+  background: #22272d !important;
 }
 
 /* Tables */
