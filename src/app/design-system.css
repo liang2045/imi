@@ -173,7 +173,7 @@ main[class*="bg-"],
   display: none !important;
 }
 
-.dashboard-sidebar > .h-20 > div:first-child {
+.dashboard-sidebar > .h-20 > :first-child {
   color: var(--accent-dark) !important;
   background: var(--accent) !important;
   border-radius: var(--radius-sm) !important;

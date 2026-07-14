@@ -8,7 +8,6 @@ import {
   IconCalendarMonth,
   IconChartPie,
   IconChevronLeft,
-  IconChevronRight,
   IconCirclePlus,
   IconDatabase,
   IconDashboard,
@@ -401,9 +400,9 @@ export function DashboardApp() {
     <div className="dashboard-shell min-h-screen bg-[#f5f5f7]" data-theme={colorMode}>
       <aside className={`dashboard-sidebar fixed inset-y-0 left-0 z-40 bg-[#30313a] text-white transition-all duration-200 ${collapsed ? "is-collapsed w-[82px]" : "is-expanded w-[286px]"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-5">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#eef0f2] text-[#30313a]"><IconBrandCampaignmonitor size={23} /></div>
+          <button type="button" onClick={() => collapsed && setCollapsed(false)} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#eef0f2] text-[#30313a] ${collapsed ? "cursor-pointer" : "cursor-default"}`} aria-label={collapsed ? "展开侧栏" : "应用标识"} title={collapsed ? "点击展开侧栏" : undefined}><IconBrandCampaignmonitor size={23} /></button>
           {!collapsed && <div className="min-w-0"><div className="truncate text-base font-semibold">imi达人管理</div><div className="text-xs text-[#c8cbd1]">IMI CREATOR OPS</div></div>}
-          <button className="ml-auto hidden text-[#c8cbd1] md:block" onClick={() => setCollapsed(!collapsed)} aria-label="折叠侧栏">{collapsed ? <IconChevronRight /> : <IconChevronLeft />}</button>
+          {!collapsed && <button className="ml-auto hidden text-[#c8cbd1] md:block" onClick={() => setCollapsed(true)} aria-label="折叠侧栏" title="折叠侧栏"><IconChevronLeft /></button>}
           <button className="ml-auto md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"><IconX /></button>
         </div>
         <nav className="space-y-1 p-3">
