@@ -565,6 +565,137 @@ strong {
   background: #22272d !important;
 }
 
+/* Legacy utility colors still present in business screens. Keep every surface and
+   text treatment readable when the semantic tokens switch to dark mode. */
+:root[data-theme="dark"] [class*="bg-white"],
+:root[data-theme="dark"] [class*="bg-[#FAFAFC]"],
+:root[data-theme="dark"] [class*="bg-[#f8fafc]"],
+:root[data-theme="dark"] [class*="bg-[#fbf6f2]"],
+:root[data-theme="dark"] [class*="bg-[#fffaf6]"],
+:root[data-theme="dark"] [class*="bg-[#f4e9e2]"],
+:root[data-theme="dark"] [class*="bg-[#f8f0ec]"],
+:root[data-theme="dark"] [class*="bg-[#f1f5f9]"],
+:root[data-theme="dark"] [class*="bg-[#eef2f7]"] {
+  background: var(--surface-subtle) !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#f0f7ff]"],
+:root[data-theme="dark"] [class*="bg-[#eaf6ff]"],
+:root[data-theme="dark"] [class*="bg-[#f5fbff]"] {
+  background: #202c3a !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#fff4e5]"],
+:root[data-theme="dark"] [class*="bg-[#fffaf2]"],
+:root[data-theme="dark"] [class*="bg-[#fff8f1]"] {
+  background: #382b20 !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#fff1f2]"] {
+  background: #39232a !important;
+}
+
+:root[data-theme="dark"] [class*="bg-[#f1f6d1]"] {
+  background: #2c3521 !important;
+}
+
+:root[data-theme="dark"] [class*="border-[#e5e7eb]"],
+:root[data-theme="dark"] [class*="border-[#E3E6EC]"],
+:root[data-theme="dark"] [class*="border-[#e7ecf1]"],
+:root[data-theme="dark"] [class*="border-[#ead8cd]"],
+:root[data-theme="dark"] [class*="border-[#eadbd2]"] {
+  border-color: var(--border-default) !important;
+}
+
+:root[data-theme="dark"] [class*="border-[#bfdbfe]"] {
+  border-color: #39567a !important;
+}
+
+:root[data-theme="dark"] [class*="border-[#f8c8ab]"] {
+  border-color: #6b4835 !important;
+}
+
+:root[data-theme="dark"] [class*="border-[#fee2e2]"],
+:root[data-theme="dark"] [class*="border-[#fecdd3]"] {
+  border-color: #6a3d48 !important;
+}
+
+:root[data-theme="dark"] [class*="border-[#c7d3a0]"] {
+  border-color: #56653e !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#111827]"],
+:root[data-theme="dark"] [class*="text-[#26272D]"],
+:root[data-theme="dark"] [class*="text-[#1d2638]"] {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#475569]"],
+:root[data-theme="dark"] [class*="text-[#64748b]"],
+:root[data-theme="dark"] [class*="text-[#687282]"],
+:root[data-theme="dark"] [class*="text-[#757A84]"],
+:root[data-theme="dark"] [class*="text-[#7b6258]"],
+:root[data-theme="dark"] [class*="text-[#7b8492]"],
+:root[data-theme="dark"] [class*="text-[#9aa3af]"],
+:root[data-theme="dark"] [class*="text-[#667085]"] {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#A3A8B2]"],
+:root[data-theme="dark"] [class*="text-[#98a2b3]"] {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#1d4ed8]"],
+:root[data-theme="dark"] [class*="text-[#2563eb]"] {
+  color: #a9c5ff !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#a23c0f]"],
+:root[data-theme="dark"] [class*="text-[#9a3c0f]"],
+:root[data-theme="dark"] [class*="text-[#c05621]"] {
+  color: #ffc18b !important;
+}
+
+:root[data-theme="dark"] [class*="text-[#424434]"] {
+  color: #d4e8a5 !important;
+}
+
+:root[data-theme="dark"] .control,
+:root[data-theme="dark"] .btn,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] textarea {
+  color: var(--text-primary) !important;
+  background-color: var(--surface-subtle) !important;
+  border-color: var(--border-default) !important;
+}
+
+:root[data-theme="dark"] option {
+  color: var(--text-primary);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .card.bg-white,
+:root[data-theme="dark"] .card[class*="bg-white"] {
+  color: var(--text-primary) !important;
+  background: var(--surface) !important;
+  border-color: var(--border-default) !important;
+}
+
+:root[data-theme="dark"] .btn-primary {
+  color: var(--accent-dark) !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+:root[data-theme="dark"] .btn-primary:hover {
+  color: var(--accent-dark) !important;
+  background: var(--accent-bright) !important;
+  border-color: var(--accent-bright) !important;
+}
+
 /* Tables */
 table {
   width: 100%;
