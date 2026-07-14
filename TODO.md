@@ -7,4 +7,4 @@
 - [ ] Complete Vercel preview deployment after Vercel CLI/browser authentication is available.
 - [ ] Add production email templates and invite workflow for team members.
 - [ ] Add a 390px Chrome visual regression capture when viewport emulation is available.
-- [ ] Initialize a Git repository or create versioned source snapshots before further large UI/data-sync changes, so local changes can be reviewed and rolled back safely.
+- [ ] Manually verify the Soft Utility Bento visual integration at desktop and mobile viewports after refreshing the local app; the automated in-app browser connection was unavailable during the 2026-07-14 integration.
