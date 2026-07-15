@@ -50,6 +50,43 @@ npm run build
 
 详细本地服务器和回调域名配置见 [LOCAL_SERVER.md](./LOCAL_SERVER.md)。
 
+## AI 表格校验
+
+达人资源库、项目充值进度、样品邮寄表均提供“AI 校验”入口。它会先显示字段识别、结构错误、重复项和可选择的格式修复；只有点击“确认应用并导入”后才会改变系统中的数据，原有导入和同步功能保持不变。
+
+统一 AI 网关必须部署在团队共用的 Next.js 服务端，并启用钉钉登录。仅在该服务器的 `.env.local` 配置以下变量，安装客户端、浏览器和 Excel 中均不保存模型密钥：
+
+```text
+AI_ENABLED=true
+AI_PROVIDER=runninghub
+RUNNINGHUB_BASE_URL=https://llm.runninghub.cn/v1
+RUNNINGHUB_API_KEY=服务器端 RunningHub API Key
+RUNNINGHUB_MODEL=bytedance/doubao-seed-evolving
+RUNNINGHUB_APP_CODE=vibex
+AI_TIMEOUT_MS=20000
+AI_MAX_ROWS=250
+AI_MAX_BYTES=400000
+```
+
+如果使用其他 OpenAI 兼容服务，则改用以下配置：
+
+```text
+AI_ENABLED=true
+AI_PROVIDER=compatible
+AI_BASE_URL=https://api.openai.com/v1
+AI_API_KEY=服务器端模型密钥
+AI_MODEL=你的模型名称
+AI_TIMEOUT_MS=20000
+AI_MAX_ROWS=250
+AI_MAX_BYTES=400000
+```
+
+`AI_PROVIDER=runninghub` 时，服务端会直接调用 RunningHub 的 OpenAI 兼容接口，默认模型为 `bytedance/doubao-seed-evolving`，并自动发送 `x-rh-llm-app-code` 和计费统计请求头。API Key 只放在运行 Next.js 的服务器 `.env.local` 中，不会进入浏览器 bundle、导出表格或安装包。也可以使用 `AI_PROVIDER=compatible` 接入其他 OpenAI 兼容服务。未配置时，“AI 校验”仍提供本地结构规则检查，但不会将表格数据发送到云端。启用云端语义校验前，界面会要求操作者确认本次完整业务字段将发送给模型；服务端只记录处理摘要，不保存原始表格内容。
+
+## 应用内 AI 工作区
+
+左侧“AI 智能助手”下提供“AI 分析中心”“AI 报告”“AI 审计”，右上角“问 AI”可打开全域助手抽屉。它会读取当前月份的合作、项目充值和样品物流数据，生成预算风险、执行进度、物流待办和下一步行动建议；报告会保存在当前浏览器的本地数据中。未配置云端模型时仍可使用本地确定性数据诊断，配置上述统一网关后，分析结果会自动增加云端模型解读。
+
 ## 本地 Supabase/PostgreSQL
 
 1. 创建本地 Supabase 或 PostgreSQL 服务。

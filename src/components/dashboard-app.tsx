@@ -20,6 +20,7 @@ import {
   IconRefresh,
   IconSearch,
   IconSettings,
+  IconSparkles,
   IconSun,
   IconTrash,
   IconTruckDelivery,
@@ -34,9 +35,11 @@ import { inferProvinceByCity, provinceCities } from "@/lib/china-regions";
 import { detectCourierByTrackingNo } from "@/lib/courier-detect";
 import { ensureMonthFinance, getAvailableMonths, getCurrentMonthValue } from "@/lib/months";
 import { hasOnlyManualSignedPrompt, hasSignedEvent } from "@/lib/shipping-status";
+import { applyReviewFixes, type AiTableType, type ImportReview, type ImportRow } from "@/lib/ai-import-review";
+import { buildLocalAssistantResponse, type AiAssistantResponse, type AiAssistantSnapshot } from "@/lib/ai-assistant";
 import { BarChart, PieChart } from "./charts";
 
-type View = "overview" | "influencers" | "creatorDatabase" | "calendar" | "shipping" | "shippingSummary" | "monthly" | "analytics" | "team";
+type View = "overview" | "influencers" | "creatorDatabase" | "calendar" | "shipping" | "shippingSummary" | "monthly" | "analytics" | "team" | "aiCenter" | "aiReports" | "aiAudit";
 type DrilldownField = "paymentStatus" | "cooperationIntent" | "influencerRejectReason" | "brandResult" | "brandRejectReason";
 type DrilldownFilter = { field: DrilldownField; value: string; title: string };
 type CreatorDatabaseSortKey = "name" | "platform" | "city" | "status" | "paymentStatus" | "intent" | "brandResult" | "rejectReason" | "owner" | "fee";
@@ -55,6 +58,8 @@ type ShippingApiResponse = {
 
 const STORAGE_KEY = "creator-ops-state-v2";
 const COLOR_MODE_STORAGE_KEY = "imi-dashboard-color-mode";
+const AI_IMPORT_CONSENT_STORAGE_KEY = "imi-ai-import-consent-v1";
+const AI_REPORTS_STORAGE_KEY = "imi-ai-reports-v1";
 const statusOrder: CollaborationStatus[] = ["样品寄送中", "达人初稿脚本中", "初稿脚本审核中", "达人修改中", "品牌最终审核中", "待达人发布", "笔记已发布", "合作延期", "合作已完成"];
 const nav: { id: View; label: string; icon: typeof IconDashboard }[] = [
   { id: "overview", label: "达人管理总视图", icon: IconDashboard },
@@ -67,6 +72,14 @@ const nav: { id: View; label: string; icon: typeof IconDashboard }[] = [
   { id: "analytics", label: "达人建联情况分析", icon: IconFileAnalytics },
   { id: "team", label: "团队与权限", icon: IconUsers },
 ];
+const aiNav: { id: View; label: string; icon: typeof IconDashboard }[] = [
+  { id: "aiCenter", label: "AI 分析中心", icon: IconSparkles },
+  { id: "aiReports", label: "AI 报告", icon: IconFileAnalytics },
+  { id: "aiAudit", label: "AI 审计", icon: IconSettings },
+];
+
+type AiRunResult = { response: AiAssistantResponse; mode: "local" | "cloud"; message?: string };
+type AiReport = AiRunResult & { id: string; title: string; createdAt: string; month: string };
 const metricTone = [
   "bg-[#F29A57]",
   "bg-[#7C6CEF]",
@@ -115,6 +128,37 @@ function getMonthAverageCents(state: AppState, month: string) {
 
 function getMonthProjectProgress(state: AppState, month: string) {
   return state.monthlyFinance?.[month]?.projectProgress || [];
+}
+
+function buildAiSnapshot(state: AppState, month: string): AiAssistantSnapshot {
+  const collaborations = state.collaborations.filter((item) => item.month === month);
+  const analytics = getAnalytics(collaborations, getMonthBudgetCents(state, month), { averageCents: getMonthAverageCents(state, month) });
+  const shipments = collaborations.reduce((result, item) => {
+    if (item.shippingStatus === "待寄出") result.pending += 1;
+    if (item.shippingStatus === "已寄出") result.shipped += 1;
+    if (item.shippingStatus === "已签收") result.signed += 1;
+    return result;
+  }, { pending: 0, shipped: 0, signed: 0 });
+  return {
+    month,
+    collaborationCount: collaborations.length,
+    spendYuan: Math.round(analytics.spendCents / 100),
+    budgetYuan: Math.round(getMonthBudgetCents(state, month) / 100),
+    budgetPercent: analytics.budgetPercent,
+    averageYuan: Math.round(analytics.averageCents / 100),
+    publishedCount: collaborations.filter((item) => ["笔记已发布", "合作已完成"].includes(item.status)).length,
+    pendingCount: collaborations.filter((item) => !["笔记已发布", "合作已完成"].includes(item.status)).length,
+    executionPercent: analytics.executionPercent,
+    statusCounts: groupCount(collaborations, "status"),
+    projects: getMonthProjectProgress(state, month).map((project) => ({
+      name: project.name,
+      budgetYuan: Math.round(project.budgetCents / 100),
+      rechargedYuan: Math.round(project.rechargedCents / 100),
+      consumedYuan: Math.round(project.consumedCents / 100),
+      remainingRechargeYuan: Math.round(project.remainingRechargeCents / 100),
+    })),
+    shipments,
+  };
 }
 
 function getYearProjectProgress(state: AppState, year: string) {
@@ -168,6 +212,113 @@ function bufferToBase64(buffer: ExcelJS.Buffer) {
     binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
   }
   return btoa(binary);
+}
+
+type AiImportDialog = {
+  tableType: AiTableType;
+  title: string;
+  headers: string[];
+  rows: ImportRow[];
+  onApply: (rows: ImportRow[], mapping: Record<string, string>) => void;
+};
+
+const aiCanonicalHeaders: Record<AiTableType, Record<string, string>> = {
+  influencers: { name: "达人名称", accounts: "账号详情", platform: "平台", type: "类型", city: "城市", followers: "总粉丝数", quote: "报价(元)", phone: "电话", tags: "标签" },
+  projectProgress: { name: "项目", budget: "充值预算", recharged: "已充值", consumed: "已消耗", remaining: "剩余可充值" },
+  shipping: { influencer: "达人", sampleContent: "样品内容", productCode: "产品编码", quantity: "样品数量", courier: "快递公司", trackingNo: "快递单号", shippingStatus: "物流状态", owner: "负责人", note: "备注" },
+};
+
+function applyAiHeaderMapping(tableType: AiTableType, rows: ImportRow[], mapping: Record<string, string>) {
+  return rows.map((row) => {
+    const next = { ...row };
+    Object.entries(mapping).forEach(([header, field]) => {
+      const canonical = aiCanonicalHeaders[tableType][field];
+      if (canonical && row[header] !== undefined) next[canonical] = row[header];
+    });
+    return next;
+  });
+}
+
+async function readSimpleWorkbookRows(file?: File) {
+  if (!file) return null;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw new Error("未找到可读取的工作表");
+  const headers = (sheet.getRow(1).values as ExcelJS.CellValue[]).slice(1).map((value) => String(value || "").trim()).filter(Boolean);
+  if (!headers.length) throw new Error("第一行未识别到表头");
+  const rows: ImportRow[] = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const next: ImportRow = {};
+    headers.forEach((header, index) => {
+      const value = row.getCell(index + 1).value;
+      next[header] = typeof value === "number" ? value : String(value ?? "");
+    });
+    if (Object.values(next).some((value) => String(value).trim())) rows.push(next);
+  });
+  return { headers, rows };
+}
+
+function AiImportReviewModal({ dialog, onClose }: { dialog: AiImportDialog; onClose: () => void }) {
+  const [consent, setConsent] = useState(() => typeof window !== "undefined" && localStorage.getItem(AI_IMPORT_CONSENT_STORAGE_KEY) === "accepted");
+  const [loading, setLoading] = useState(false);
+  const [review, setReview] = useState<ImportReview | null>(null);
+  const [selectedFixes, setSelectedFixes] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [semanticReviewed, setSemanticReviewed] = useState(false);
+
+  const inspect = async () => {
+    if (!consent) return setMessage("请先确认数据发送说明后再开始 AI 校验。");
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/ai/import-review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tableType: dialog.tableType, headers: dialog.headers, rows: dialog.rows }) });
+      const payload = await response.json() as { review?: ImportReview; message?: string; error?: string; semanticReviewed?: boolean };
+      if (!response.ok || !payload.review) throw new Error(payload.error || payload.message || "AI 校验失败");
+      setReview(payload.review);
+      setSelectedFixes(payload.review.fixes.map((fix) => fix.id));
+      setSemanticReviewed(Boolean(payload.semanticReviewed));
+      setMessage(payload.message || "AI 校验完成；请确认修复项后再导入。");
+      localStorage.setItem(AI_IMPORT_CONSENT_STORAGE_KEY, "accepted");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI 校验失败，未修改任何数据。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const errors = review?.issues.filter((issue) => issue.severity === "error").length || 0;
+  const apply = () => {
+    if (!review || errors) return;
+    const rows = applyAiHeaderMapping(dialog.tableType, applyReviewFixes(dialog.rows, review.fixes, selectedFixes), review.fieldMapping);
+    dialog.onApply(rows, review.fieldMapping);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/50 p-4" onMouseDown={onClose}>
+      <section className="card flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden bg-white" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-[#E3E6EC] p-5">
+          <div><h2 className="flex items-center gap-2 text-xl font-semibold"><IconSparkles size={20} />AI 表格校验</h2><p className="mt-1 text-sm text-[#687282]">{dialog.title} · {dialog.rows.length} 行。AI 只生成建议，确认后才会导入。</p></div>
+          <button type="button" onClick={onClose} aria-label="关闭"><IconX /></button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-auto p-5">
+          <label className="flex gap-3 rounded-xl border border-[#dbe4ef] bg-[#f8fafc] p-4 text-sm text-[#334155]"><input type="checkbox" className="mt-1" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>我知晓：启用统一 AI 网关后，本次表格的完整业务字段会发送到模型服务用于校验。系统不会自动写回 Excel 或修改现有数据。</span></label>
+          {!review && <button type="button" className="btn btn-primary" disabled={loading} onClick={inspect}><IconSparkles size={16} />{loading ? "校验中…" : "开始 AI 校验"}</button>}
+          {message && <p className="rounded-xl border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1d4ed8]">{message}</p>}
+          {review && <>
+            <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-[#fff4ed] p-3"><strong className="text-lg text-[#a23c0f]">{errors}</strong><p className="text-xs text-[#7b6258]">需处理错误</p></div><div className="rounded-xl bg-[#fffbeb] p-3"><strong className="text-lg text-[#a16207]">{review.issues.filter((issue) => issue.severity === "warning").length}</strong><p className="text-xs text-[#7b6258]">待确认项</p></div><div className="rounded-xl bg-[#effdf7] p-3"><strong className="text-lg text-[#047857]">{semanticReviewed ? "已启用" : "规则校验"}</strong><p className="text-xs text-[#7b6258]">语义分析状态</p></div></div>
+            {review.semanticSummary && <p className="rounded-xl bg-[#f6f3ff] p-3 text-sm text-[#5b4bb7]">AI 摘要：{review.semanticSummary}</p>}
+            <section><h3 className="mb-2 font-medium">字段识别</h3><div className="flex flex-wrap gap-2">{Object.entries(review.fieldMapping).map(([header, field]) => <span key={header} className="tag tag-violet">{header} → {aiCanonicalHeaders[dialog.tableType][field] || field}</span>)}</div></section>
+            <section><h3 className="mb-2 font-medium">问题清单</h3><div className="space-y-2">{review.issues.length ? review.issues.map((issue) => <p key={issue.id} className={`rounded-xl border p-3 text-sm ${issue.severity === "error" ? "border-[#fecaca] bg-[#fff1f2] text-[#9f1239]" : issue.severity === "warning" ? "border-[#fde68a] bg-[#fffbeb] text-[#92400e]" : "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]"}`}>{issue.source === "ai" ? "AI · " : "规则 · "}{issue.message}</p>) : <p className="rounded-xl bg-[#effdf7] p-3 text-sm text-[#047857]">未发现结构性问题。</p>}</div></section>
+            <section><h3 className="mb-2 font-medium">可应用修复</h3><div className="space-y-2">{review.fixes.length ? review.fixes.map((fix) => <label key={fix.id} className="flex items-center gap-3 rounded-xl border border-[#e3e8ef] p-3 text-sm"><input type="checkbox" checked={selectedFixes.includes(fix.id)} onChange={(event) => setSelectedFixes((current) => event.target.checked ? [...current, fix.id] : current.filter((id) => id !== fix.id))} />{fix.label}</label>) : <p className="text-sm text-[#687282]">没有可安全自动修复的项目。</p>}</div></section>
+          </>}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-[#E3E6EC] p-5"><button type="button" className="btn" onClick={onClose}>取消</button>{review && <button type="button" className="btn btn-primary" disabled={errors > 0} onClick={apply}>{errors ? "请先处理错误" : "确认应用并导入"}</button>}</div>
+      </section>
+    </div>
+  );
 }
 
 async function exportWorkbookBuffer(buffer: ExcelJS.Buffer, filename: string, exportDirectory?: string) {
@@ -331,6 +482,17 @@ export function DashboardApp() {
   const [collapsed, setCollapsed] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+  const [aiReports, setAiReports] = useState<AiReport[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const savedReports = localStorage.getItem(AI_REPORTS_STORAGE_KEY);
+      return savedReports ? JSON.parse(savedReports) as AiReport[] : [];
+    } catch {
+      return [];
+    }
+  });
+  const [aiReportToOpen, setAiReportToOpen] = useState<AiReport | null>(null);
   const [drilldownFilter, setDrilldownFilter] = useState<DrilldownFilter | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>(() => {
     if (typeof window === "undefined") return "light";
@@ -372,6 +534,10 @@ export function DashboardApp() {
     if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, loaded]);
 
+  useEffect(() => {
+    if (loaded) localStorage.setItem(AI_REPORTS_STORAGE_KEY, JSON.stringify(aiReports.slice(0, 12)));
+  }, [aiReports, loaded]);
+
   const resetLocalData = () => {
     localStorage.removeItem(STORAGE_KEY);
     setState(ensureMonthFinance(initialState, currentMonth));
@@ -384,6 +550,25 @@ export function DashboardApp() {
     setSidebarOpen(false);
   };
 
+  const runAi = async (question: string, targetMonth = month): Promise<AiRunResult> => {
+    const snapshot = buildAiSnapshot(state, targetMonth);
+    try {
+      const response = await fetch("/api/ai/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, snapshot }) });
+      const payload = await response.json() as { response?: AiAssistantResponse; mode?: "local" | "cloud"; message?: string; error?: string };
+      if (!response.ok || !payload.response) throw new Error(payload.error || "AI 助手暂时不可用");
+      return { response: payload.response, mode: payload.mode || "local", message: payload.message };
+    } catch {
+      return { response: buildLocalAssistantResponse(question, snapshot), mode: "local", message: "网络不可用，已使用本地数据分析。" };
+    }
+  };
+
+  const generateAiReport = async () => {
+    const result = await runAi(`生成 ${monthLabel(month)} 的合作管理报告，包含预算、充值、合作执行、样品物流和下一步建议。`);
+    const report: AiReport = { ...result, id: `${Date.now()}`, title: result.response.title, createdAt: new Date().toISOString(), month };
+    setAiReports((current) => [report, ...current].slice(0, 12));
+    return report;
+  };
+
   const content =
     view === "overview" ? <Overview state={state} setState={setState} month={month} onDrilldown={openCreatorDatabase} /> :
     view === "influencers" ? <Influencers state={state} setState={setState} onAdd={() => setShowAdd(true)} /> :
@@ -393,6 +578,9 @@ export function DashboardApp() {
     view === "shippingSummary" ? <ShippingSummaryPage state={state} month={month} /> :
     view === "monthly" ? <Monthly state={state} setState={setState} month={month} /> :
     view === "analytics" ? <Analytics state={state} month={month} onDrilldown={openCreatorDatabase} /> :
+    view === "aiCenter" ? <AiCenter state={state} month={month} onAsk={() => { setAiReportToOpen(null); setAiDrawerOpen(true); }} onGenerate={generateAiReport} /> :
+    view === "aiReports" ? <AiReports reports={aiReports} onGenerate={generateAiReport} onOpen={(report) => { setAiReportToOpen(report); setAiDrawerOpen(true); }} /> :
+    view === "aiAudit" ? <AiAudit state={state} month={month} onAsk={() => { setAiReportToOpen(null); setAiDrawerOpen(true); }} /> :
     <Team state={state} />;
   const monthOptions = getAvailableMonths(state, month);
 
@@ -407,6 +595,8 @@ export function DashboardApp() {
         </div>
         <nav className="space-y-1 p-3">
           {nav.map((item) => <button key={item.id} title={item.label} onClick={() => { if (item.id === "creatorDatabase") setDrilldownFilter(null); setView(item.id); setSidebarOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${view === item.id ? "bg-[#eef0f2] text-[#30313a]" : "text-[#d8dbe0] hover:bg-white/10"}`}><item.icon size={21} />{!collapsed && item.label}</button>)}
+          {!collapsed && <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9299a4]">AI 智能助手</div>}
+          {aiNav.map((item) => <button key={item.id} title={item.label} onClick={() => { setView(item.id); setSidebarOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${view === item.id ? "bg-[#eef0f2] text-[#30313a]" : "text-[#d8dbe0] hover:bg-white/10"}`}><item.icon size={21} />{!collapsed && <>{item.label}{item.id === "aiCenter" && <span className="ml-auto rounded-full bg-[#c6ff58] px-1.5 py-0.5 text-[10px] font-bold text-[#17210e]">NEW</span>}</>}</button>)}
         </nav>
         <div className="absolute inset-x-3 bottom-4 border-t border-white/10 pt-4">
           <div className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#c8cbd1]">
@@ -419,9 +609,10 @@ export function DashboardApp() {
       <main className={`dashboard-main transition-all duration-200 ${collapsed ? "md:ml-[82px]" : "md:ml-[286px]"}`}>
         <header className="dashboard-topbar sticky top-0 z-30 flex h-20 items-center border-b border-[#eadbd2] bg-[#fffaf6]/88 px-4 backdrop-blur md:px-8">
           <button className="mr-3 md:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开导航"><IconMenu2 /></button>
-          <div><h1 className="text-lg font-semibold md:text-xl">{nav.find((n) => n.id === view)?.label}</h1><p className="hidden text-xs text-[#7b6258] sm:block">集中管理达人合作进度、费用与交付</p></div>
+          <div><h1 className="text-lg font-semibold md:text-xl">{[...nav, ...aiNav].find((n) => n.id === view)?.label}</h1><p className="hidden text-xs text-[#7b6258] sm:block">集中管理达人合作进度、费用与交付</p></div>
           <div className="ml-auto flex items-center gap-2">
             <select className="control max-w-32" value={month} onChange={(e) => setMonth(e.target.value)}>{monthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
+            <button className="btn hidden h-10 items-center gap-2 px-3 sm:flex" onClick={() => { setAiReportToOpen(null); setAiDrawerOpen(true); }}><IconSparkles size={17} />问 AI</button>
             <button className="theme-toggle grid h-10 w-10 place-items-center rounded-full" onClick={toggleColorMode} aria-label={colorMode === "light" ? "切换到深色模式" : "切换到浅色模式"} title={colorMode === "light" ? "深色模式" : "浅色模式"}>
               {colorMode === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
             </button>
@@ -434,9 +625,73 @@ export function DashboardApp() {
 
       {sidebarOpen && <button aria-label="关闭导航" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-black/40 md:hidden" />}
       {showAdd && <AddInfluencer onClose={() => setShowAdd(false)} onSave={(influencer) => { setState((s) => ({ ...s, influencers: [influencer, ...s.influencers] })); setShowAdd(false); }} />}
+      {aiDrawerOpen && <AiAssistantDrawer month={month} initialReport={aiReportToOpen} onAsk={(question) => runAi(question)} onClose={() => { setAiDrawerOpen(false); setAiReportToOpen(null); }} />}
       {showSettings && <SettingsModal state={state} month={month} months={monthOptions} onClose={() => setShowSettings(false)} onSave={({ budgetYuan, userName, defaultMonth, exportDirectory }) => { setState((s) => ({ ...s, monthlyFinance: { ...s.monthlyFinance, [defaultMonth]: { ...s.monthlyFinance?.[defaultMonth], budgetCents: Math.round(budgetYuan * 100) } }, settings: { ...s.settings, exportDirectory: exportDirectory.trim() || undefined }, currentUser: { ...s.currentUser, name: userName } })); setMonth(defaultMonth); setShowSettings(false); }} onReset={resetLocalData} />}
     </div>
   );
+}
+
+function aiLevelClass(level: AiAssistantResponse["findings"][number]["level"]) {
+  if (level === "risk") return "border-[#fecaca] bg-[#fff1f2] text-[#9f1239]";
+  if (level === "watch") return "border-[#fde68a] bg-[#fffbeb] text-[#92400e]";
+  if (level === "good") return "border-[#bbf7d0] bg-[#f0fdf4] text-[#166534]";
+  return "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]";
+}
+
+function AiFindings({ response }: { response: AiAssistantResponse }) {
+  return <>
+    <p className="rounded-2xl border border-[#e3e8ef] bg-[#f8fafc] p-4 text-sm leading-6 text-[#334155]">{response.summary}</p>
+    <div className="grid gap-3 md:grid-cols-2">{response.findings.map((finding) => <article key={`${finding.title}-${finding.detail}`} className={`rounded-2xl border p-4 ${aiLevelClass(finding.level)}`}><div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{finding.title}</h3><span className="text-xs font-medium">{finding.level === "risk" ? "风险" : finding.level === "watch" ? "关注" : finding.level === "good" ? "正常" : "信息"}</span></div><p className="mt-2 text-sm leading-6">{finding.detail}</p></article>)}</div>
+    <section className="rounded-2xl border border-[#e3e8ef] bg-white p-4"><h3 className="font-semibold">建议行动</h3><ul className="mt-3 space-y-2 text-sm leading-6 text-[#475569]">{response.actions.map((action) => <li key={action} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#b8ff3d]" />{action}</li>)}</ul></section>
+  </>;
+}
+
+function AiCenter({ state, month, onAsk, onGenerate }: { state: AppState; month: string; onAsk: () => void; onGenerate: () => Promise<AiReport> }) {
+  const snapshot = buildAiSnapshot(state, month);
+  const [latest, setLatest] = useState<AiReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const generate = async () => { setLoading(true); try { setLatest(await onGenerate()); } finally { setLoading(false); } };
+  return <div className="space-y-7">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><SectionTitle title="AI 分析中心" /><p className="-mt-2 text-sm text-[#687282]">基于当前月份的合作、项目充值和样品物流台账，生成可执行的经营判断。</p></div><div className="flex gap-2"><button className="btn" onClick={onAsk}><IconSparkles size={16} />问 AI</button><button className="btn btn-primary" onClick={generate} disabled={loading}><IconFileAnalytics size={16} />{loading ? "生成中…" : "生成管理报告"}</button></div></div>
+    <section className="card overflow-hidden bg-[#111311] p-5 text-white"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.16em] text-[#c6ff58]">AI DATA WORKSPACE</p><h2 className="mt-2 text-2xl font-semibold">{monthLabel(month)}的经营数据已经准备好</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-[#cbd0d5]">AI 只提供分析和建议，不会自动修改达人、充值或物流数据。确认后仍通过原有业务流程保存。</p></div><div className="rounded-2xl bg-[#c6ff58] px-4 py-3 text-[#17210e]"><p className="text-xs">本月合作</p><strong className="text-3xl">{snapshot.collaborationCount}</strong><p className="text-xs">条业务记录</p></div></div></section>
+    <div className="grid gap-4 md:grid-cols-4"><AiMetric label="达人费用" value={money(snapshot.spendYuan * 100)} note={`预算使用 ${snapshot.budgetPercent}%`} /><AiMetric label="项目充值" value={money(snapshot.projects.reduce((sum, project) => sum + project.rechargedYuan, 0) * 100)} note={`${snapshot.projects.length} 个项目`} /><AiMetric label="执行进度" value={`${snapshot.executionPercent}%`} note={`${snapshot.pendingCount} 条待跟进`} /><AiMetric label="样品物流" value={`${snapshot.shipments.shipped + snapshot.shipments.signed}`} note={`${snapshot.shipments.pending} 条待寄出`} /></div>
+    <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]"><section className="card p-5"><SectionTitle title="数据洞察" /><div className="space-y-3"><InsightRow title="预算健康度" value={`${snapshot.budgetPercent}%`} detail={snapshot.budgetPercent >= 90 ? "接近预算上限，需要关注新增合作费用" : "当前费用仍在预算范围内"} tone={snapshot.budgetPercent >= 90 ? "risk" : "good"} /><InsightRow title="合作推进" value={`${snapshot.publishedCount} 已发布`} detail={`${snapshot.pendingCount} 条记录仍需继续跟进`} tone={snapshot.pendingCount > 8 ? "watch" : "good"} /><InsightRow title="物流待办" value={`${snapshot.shipments.pending} 待寄出`} detail={`${snapshot.shipments.shipped} 条在寄，${snapshot.shipments.signed} 条已签收`} tone={snapshot.shipments.pending ? "watch" : "good"} /></div></section><section className="card p-5"><SectionTitle title="你可以这样问" /><div className="space-y-2">{["本月哪些项目需要关注充值？", "生成本月合作管理报告", "样品物流有哪些待办？"].map((question) => <button key={question} className="btn w-full justify-start text-left" onClick={onAsk}>{question}<span className="ml-auto">→</span></button>)}</div></section></div>
+    {latest && <section className="card p-5"><div className="mb-4 flex items-center justify-between"><SectionTitle title={latest.title} /><span className="tag tag-violet">{latest.mode === "cloud" ? "云端 AI" : "本地数据助手"}</span></div><AiFindings response={latest.response} /></section>}
+  </div>;
+}
+
+function AiMetric({ label, value, note }: { label: string; value: string; note: string }) {
+  return <article className="card p-4"><p className="text-xs text-[#687282]">{label}</p><strong className="mt-2 block text-2xl">{value}</strong><p className="mt-1 text-xs text-[#98a2b3]">{note}</p></article>;
+}
+
+function InsightRow({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: "good" | "watch" | "risk" }) {
+  const color = tone === "risk" ? "bg-[#ec6a6a]" : tone === "watch" ? "bg-[#f2b84b]" : "bg-[#48c774]";
+  return <div className="flex items-start gap-3 rounded-xl border border-[#e3e8ef] p-3"><span className={`mt-1 h-2.5 w-2.5 rounded-full ${color}`} /><div className="min-w-0 flex-1"><div className="flex justify-between gap-3"><strong className="text-sm">{title}</strong><span className="text-sm font-semibold">{value}</span></div><p className="mt-1 text-xs leading-5 text-[#687282]">{detail}</p></div></div>;
+}
+
+function AiReports({ reports, onGenerate, onOpen }: { reports: AiReport[]; onGenerate: () => Promise<AiReport>; onOpen: (report: AiReport) => void }) {
+  const [loading, setLoading] = useState(false);
+  const generate = async () => { setLoading(true); try { await onGenerate(); } finally { setLoading(false); } };
+  return <div className="space-y-7"><div className="flex flex-wrap items-end justify-between gap-3"><div><SectionTitle title="AI 报告" /><p className="-mt-2 text-sm text-[#687282]">保存每次生成的周报、月报和专项复盘，便于团队回看。</p></div><button className="btn btn-primary" onClick={generate} disabled={loading}><IconSparkles size={16} />{loading ? "生成中…" : "生成本月报告"}</button></div>{reports.length ? <div className="grid gap-4 lg:grid-cols-3">{reports.map((report) => <article key={report.id} className="card p-5"><div className="flex items-start justify-between gap-3"><span className="tag tag-violet">{report.month}</span><span className="text-xs text-[#98a2b3]">{new Date(report.createdAt).toLocaleString("zh-CN")}</span></div><h3 className="mt-4 text-lg font-semibold">{report.title}</h3><p className="mt-2 line-clamp-3 text-sm leading-6 text-[#687282]">{report.response.summary}</p><div className="mt-4 flex items-center justify-between"><span className="text-xs text-[#98a2b3]">{report.mode === "cloud" ? "云端 AI 解读" : "本地规则诊断"}</span><button className="btn px-3 py-2 text-xs" onClick={() => onOpen(report)}>AI 解读</button></div></article>)}</div> : <div className="card grid min-h-64 place-items-center p-8 text-center"><div><IconFileAnalytics className="mx-auto text-[#98a2b3]" size={42} /><h3 className="mt-3 text-lg font-semibold">还没有 AI 报告</h3><p className="mt-2 text-sm text-[#687282]">点击“生成本月报告”，基于当前月份的业务数据创建第一份报告。</p></div></div>}</div>;
+}
+
+function AiAudit({ state, month, onAsk }: { state: AppState; month: string; onAsk: () => void }) {
+  const items = state.collaborations.filter((item) => item.month === month);
+  const issues = [
+    ...items.filter((item) => !item.owner).map((item) => `合作「${item.influencerName}」缺少负责人`),
+    ...items.filter((item) => item.shippingStatus !== "待寄出" && !item.trackingNo).map((item) => `合作「${item.influencerName}」已进入物流流程但缺少单号`),
+    ...items.filter((item) => item.feeCents < 0).map((item) => `合作「${item.influencerName}」费用不能为负数`),
+    ...getMonthProjectProgress(state, month).filter((project) => project.rechargedCents > project.budgetCents || project.consumedCents > project.budgetCents).map((project) => `项目「${project.name}」充值或消耗超过预算`),
+  ];
+  return <div className="space-y-7"><div className="flex flex-wrap items-end justify-between gap-3"><div><SectionTitle title="AI 审计" /><p className="-mt-2 text-sm text-[#687282]">对当前月份的合作、项目充值、样品物流进行可解释的数据完整性检查。</p></div><button className="btn" onClick={onAsk}><IconSparkles size={16} />让 AI 解读审计结果</button></div><section className="card p-5"><div className="grid gap-4 md:grid-cols-3"><AiMetric label="审计记录" value={`${items.length}`} note="当前月份合作记录" /><AiMetric label="发现问题" value={`${issues.length}`} note={issues.length ? "需要处理或确认" : "当前没有发现异常"} /><AiMetric label="审计范围" value="4 类" note="合作 / 充值 / 物流 / 费用" /></div></section><section className="card p-5"><SectionTitle title="审计结果" /><div className="space-y-3">{issues.length ? issues.map((issue) => <div key={issue} className="flex gap-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 text-sm text-[#92400e]"><span>!</span>{issue}</div>) : <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] p-5 text-sm text-[#166534]">当前月份没有发现明显的数据完整性问题。导入新表格后可在 AI 校验中继续检查字段和重复项。</div>}</div></section></div>;
+}
+
+function AiAssistantDrawer({ month, initialReport, onAsk, onClose }: { month: string; initialReport: AiReport | null; onAsk: (question: string) => Promise<AiRunResult>; onClose: () => void }) {
+  const [question, setQuestion] = useState("本月经营数据有哪些重点？");
+  const [result, setResult] = useState<AiRunResult | null>(initialReport ? { response: initialReport.response, mode: initialReport.mode, message: initialReport.message } : null);
+  const [loading, setLoading] = useState(false);
+  const ask = async (event?: FormEvent) => { event?.preventDefault(); if (!question.trim()) return; setLoading(true); try { setResult(await onAsk(question.trim())); } finally { setLoading(false); } };
+  return <div className="fixed inset-0 z-[65] bg-black/45" onMouseDown={onClose}><aside className="ml-auto flex h-full w-full max-w-xl flex-col overflow-hidden bg-[var(--surface)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--border-default)] p-5"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#76a814]">imi AI</p><h2 className="mt-1 text-xl font-semibold">全域 AI 数据助手</h2><p className="mt-1 text-xs text-[#687282]">基于确定性数据 + 模型解读 · {monthLabel(month)}</p></div><button className="btn grid h-9 w-9 place-items-center p-0" onClick={onClose} aria-label="关闭 AI 助手"><IconX size={18} /></button></div><div className="border-b border-[var(--border-default)] p-4"><form className="flex gap-2" onSubmit={ask}><input className="control min-w-0 flex-1" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="问问本月费用、充值、合作或物流…" /><button className="btn btn-primary shrink-0 px-4" disabled={loading}>{loading ? "分析中" : "问一下"}</button></form><div className="mt-3 flex flex-wrap gap-2">{["预算还有哪些风险？", "哪些物流需要跟进？", "生成本月管理报告"].map((item) => <button type="button" key={item} className="tag" onClick={() => { setQuestion(item); void onAsk(item).then(setResult); }}>{item}</button>)}</div></div><div className="flex-1 space-y-4 overflow-y-auto p-4">{result ? <><div className="flex items-center justify-between"><h3 className="text-lg font-semibold">{result.response.title}</h3><span className="tag tag-violet">{result.mode === "cloud" ? "云端 AI" : "本地数据助手"}</span></div>{result.message && <p className="rounded-xl border border-[#bfdbfe] bg-[#eff6ff] p-3 text-xs text-[#1d4ed8]">{result.message}</p>}<AiFindings response={result.response} /></> : <div className="grid min-h-64 place-items-center text-center"><div><IconSparkles className="mx-auto text-[#76a814]" size={42} /><h3 className="mt-3 font-semibold">开始和本月数据对话</h3><p className="mt-2 text-sm leading-6 text-[#687282]">你可以询问费用、项目充值、合作进度、样品寄送和需要跟进的事项。</p></div></div>}</div><div className="border-t border-[var(--border-default)] p-4 text-center text-xs text-[#98a2b3]">AI 只提供分析建议，不会自动修改业务数据</div></aside></div>;
 }
 
 function SettingsModal({ state, month, months, onClose, onSave, onReset }: { state: AppState; month: string; months: string[]; onClose: () => void; onSave: (value: { budgetYuan: number; userName: string; defaultMonth: string; exportDirectory: string }) => void; onReset: () => void }) {
@@ -637,8 +892,10 @@ function ProjectFinanceModal({ projects, onClose, onSave }: { projects: MonthlyP
 
 function ProjectProgressSyncActions({ state, setState, month, projects, onMessage }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; month: string; projects: MonthlyProjectFinance[]; onMessage: (message: string, persistent?: boolean) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const aiFileRef = useRef<HTMLInputElement>(null);
   const [syncing, setSyncing] = useState(false);
   const [externalChanged, setExternalChanged] = useState(false);
+  const [aiDialog, setAiDialog] = useState<AiImportDialog | null>(null);
   const syncInfo = state.settings?.projectProgressSync?.[month];
   const signature = projectProgressSignature(month, projects);
 
@@ -736,6 +993,42 @@ function ProjectProgressSyncActions({ state, setState, month, projects, onMessag
     }
   };
 
+  const reviewWithAi = async (file?: File) => {
+    if (!file) return;
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(await file.arrayBuffer());
+      const sheet = workbook.worksheets[0];
+      if (!sheet) throw new Error("未找到可读取的工作表");
+      const rawRows: string[][] = [];
+      sheet.eachRow((row) => {
+        const values: string[] = [];
+        const maxColumn = sheet.columnCount || row.cellCount;
+        for (let index = 1; index <= maxColumn; index += 1) values.push(String(row.getCell(index).text || row.getCell(index).value || "").trim());
+        rawRows.push(values);
+      });
+      const importedProjects = parseProjectProgressRawRows(rawRows, projects);
+      if (!importedProjects.length) throw new Error("未识别到项目充值行，请先检查项目、预算、已充值和已消耗列。");
+      const headers = ["项目", "充值预算", "已充值", "已消耗", "剩余可充值"];
+      const rows = importedProjects.map((project) => ({ 项目: project.name, 充值预算: project.budgetCents / 100, 已充值: project.rechargedCents / 100, 已消耗: project.consumedCents / 100, 剩余可充值: project.remainingRechargeCents / 100 }));
+      setAiDialog({ tableType: "projectProgress", title: "项目充值进度表", headers, rows, onApply: (reviewedRows) => {
+        const nextProjects = reviewedRows.map((row) => ({
+          name: String(row["项目"] || "").trim(),
+          budgetCents: Math.round(yuanNumber(row["充值预算"]) * 100),
+          rechargedCents: Math.round(yuanNumber(row["已充值"]) * 100),
+          consumedCents: Math.round(yuanNumber(row["已消耗"]) * 100),
+          remainingRechargeCents: Math.round(yuanNumber(row["剩余可充值"]) * 100),
+        })).filter((project) => project.name && project.budgetCents >= 0);
+        applyProjects(nextProjects);
+        onMessage(`已应用 AI 校验后的 ${nextProjects.length} 个项目充值数据。`);
+      } });
+    } catch (error) {
+      onMessage(`AI 校验准备失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      if (aiFileRef.current) aiFileRef.current.value = "";
+    }
+  };
+
   const syncProgress = async () => {
     if (!syncInfo?.path) {
       await exportProgress();
@@ -773,9 +1066,12 @@ function ProjectProgressSyncActions({ state, setState, month, projects, onMessag
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => importFile(event.target.files?.[0])} />
+      <input ref={aiFileRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => reviewWithAi(event.target.files?.[0])} />
       <button type="button" className="btn h-9 min-h-9 px-3 text-xs" onClick={() => fileRef.current?.click()}><IconUpload size={15} />导入</button>
+      <button type="button" className="btn h-9 min-h-9 px-3 text-xs" onClick={() => aiFileRef.current?.click()}><IconSparkles size={15} />AI 校验</button>
       <button type="button" className="btn h-9 min-h-9 px-3 text-xs" onClick={exportProgress}><IconDownload size={15} />导出</button>
       <button type="button" className="btn h-9 min-h-9 px-3 text-xs" onClick={syncProgress} disabled={syncing}><IconRefresh size={15} className={syncing ? "animate-spin" : ""} />{syncing ? "同步中" : "同步"}{externalChanged && <span className="ml-1 h-2 w-2 rounded-full bg-[#f97316]" />}</button>
+      {aiDialog && <AiImportReviewModal dialog={aiDialog} onClose={() => setAiDialog(null)} />}
     </div>
   );
 }
@@ -1045,6 +1341,8 @@ function Influencers({ state, setState, onAdd }: { state: AppState; setState: Re
   const [syncing, setSyncing] = useState(false);
   const [externalChanged, setExternalChanged] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const aiFileRef = useRef<HTMLInputElement>(null);
+  const [aiDialog, setAiDialog] = useState<AiImportDialog | null>(null);
   const filtered = state.influencers.filter((i) => `${i.name}${i.handle}${i.type}${i.city}${accountList(i).map((a) => `${a.platform}${a.handle}`).join("")}`.toLowerCase().includes(query.toLowerCase()));
   const syncInfo = state.settings?.resourceLibrarySync;
   const currentSignature = influencerSyncSignature(state.influencers);
@@ -1206,9 +1504,24 @@ function Influencers({ state, setState, onAdd }: { state: AppState; setState: Re
     const added = parseInfluencerRows(rows);
     setState((s) => ({ ...s, influencers: [...added, ...s.influencers] }));
   };
+  const reviewWithAi = async (file?: File) => {
+    try {
+      const content = await readSimpleWorkbookRows(file);
+      if (!content?.rows.length) throw new Error("表格没有可校验的数据行");
+      setAiDialog({ tableType: "influencers", title: "达人资源库", ...content, onApply: (rows) => {
+        const added = parseInfluencerRows(rows);
+        setState((s) => ({ ...s, influencers: [...added, ...s.influencers] }));
+        setMessage(`已导入 AI 校验后的 ${added.length} 位达人。`);
+      } });
+    } catch (error) {
+      setMessage(`AI 校验准备失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      if (aiFileRef.current) aiFileRef.current.value = "";
+    }
+  };
   return (
     <div>
-      <SectionTitle title={`达人资源库 · ${filtered.length}`} action={<div className="flex gap-2"><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => importData(e.target.files?.[0])} /><button className="btn hidden sm:flex" onClick={() => fileRef.current?.click()}><IconUpload size={17} />导入</button><button className="btn hidden sm:flex" onClick={syncData} disabled={syncing}><IconDownload size={17} />{syncing ? "同步中" : syncButtonLabel}{externalChanged && <span className="ml-1 h-2 w-2 rounded-full bg-[#f97316]" />}</button><button className="btn border-[#f8c8ab] bg-[#fee8d9] text-[#a23c0f] hover:bg-[#fff4ed]" onClick={onAdd}><IconCirclePlus size={18} />新增达人</button></div>} />
+      <SectionTitle title={`达人资源库 · ${filtered.length}`} action={<div className="flex gap-2"><input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => importData(e.target.files?.[0])} /><input ref={aiFileRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => reviewWithAi(e.target.files?.[0])} /><button className="btn hidden sm:flex" onClick={() => fileRef.current?.click()}><IconUpload size={17} />导入</button><button className="btn hidden sm:flex" onClick={() => aiFileRef.current?.click()}><IconSparkles size={17} />AI 校验</button><button className="btn hidden sm:flex" onClick={syncData} disabled={syncing}><IconDownload size={17} />{syncing ? "同步中" : syncButtonLabel}{externalChanged && <span className="ml-1 h-2 w-2 rounded-full bg-[#f97316]" />}</button><button className="btn border-[#f8c8ab] bg-[#fee8d9] text-[#a23c0f] hover:bg-[#fff4ed]" onClick={onAdd}><IconCirclePlus size={18} />新增达人</button></div>} />
       {message && <p className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#bfdbfe] bg-[#dbeafe] p-3 text-xs text-[#1d4ed8]"><span>{message}</span><button type="button" className="shrink-0 rounded-lg px-2 py-1 hover:bg-white/70" onClick={() => setMessage("")}>关闭</button></p>}
       <div className="card overflow-hidden">
         <div className="flex items-center gap-2 border-b border-[#e5e7eb] p-4"><IconSearch size={19} className="text-[#64748b]" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="w-full bg-transparent outline-none" placeholder="搜索达人、账号、平台、类型或城市" /></div>
@@ -1219,6 +1532,7 @@ function Influencers({ state, setState, onAdd }: { state: AppState; setState: Re
         })}</tbody></table></div>
       </div>
       {editing && <InfluencerForm title="编辑达人" initial={editing} onClose={() => setEditing(null)} onSave={updateInfluencer} />}
+      {aiDialog && <AiImportReviewModal dialog={aiDialog} onClose={() => setAiDialog(null)} />}
     </div>
   );
 }
@@ -1416,6 +1730,8 @@ function Shipping({ state, setState, month }: { state: AppState; setState: React
   const [editingShipment, setEditingShipment] = useState<Collaboration | null>(null);
   const [shippingMessage, setShippingMessage] = useState("");
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const aiFileRef = useRef<HTMLInputElement>(null);
+  const [aiDialog, setAiDialog] = useState<AiImportDialog | null>(null);
 
   const exportShippingData = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -1566,9 +1882,60 @@ function Shipping({ state, setState, month }: { state: AppState; setState: React
     setShippingMessage(`${item.influencerName} 已人工确认签收。`);
   };
 
+  const reviewShippingWithAi = async (file?: File) => {
+    try {
+      const content = await readSimpleWorkbookRows(file);
+      if (!content?.rows.length) throw new Error("表格没有可校验的数据行");
+      setAiDialog({ tableType: "shipping", title: "样品邮寄表", ...content, onApply: (rows) => {
+        const imported = rows.map((row, index) => {
+          const trackingNo = String(row["快递单号"] || "").trim();
+          const shippingText = String(row["物流状态"] || "已寄出");
+          const shippingStatus: ShippingStatus = shippingText.includes("签收") ? "已签收" : shippingText.includes("待寄") ? "待寄出" : "已寄出";
+          const signed = shippingStatus === "已签收";
+          return {
+            id: `ai-shipping-${Date.now()}-${index}`,
+            influencerId: `ai-shipping-${Date.now()}-${index}`,
+            influencerName: String(row["达人"] || "未命名达人").trim(),
+            month,
+            status: signed ? "达人初稿脚本中" : "样品寄送中",
+            shippingStatus,
+            paymentStatus: "未申请",
+            owner: String(row["负责人"] || state.currentUser.name).trim(),
+            feeCents: 0,
+            plannedPublishDate: `${month}-01`,
+            courier: String(row["快递公司"] || "").trim(),
+            trackingNo,
+            trackingMode: "manual" as const,
+            trackingUpdatedAt: new Date().toISOString(),
+            sampleContent: String(row["样品内容"] || "").trim() || undefined,
+            sampleProductCode: String(row["产品编码"] || "").trim() || undefined,
+            sampleQuantity: Math.max(1, Math.round(yuanNumber(row["样品数量"]) || 1)),
+            shippingNote: String(row["备注"] || "").trim() || undefined,
+            cooperationIntent: "微信沟通/测品中" as const,
+            brandResult: "品牌/客户审核中" as const,
+          } satisfies Collaboration;
+        });
+        setState((current) => {
+          const next = [...current.collaborations];
+          imported.forEach((item) => {
+            const existingIndex = next.findIndex((currentItem) => currentItem.month === month && currentItem.trackingNo && currentItem.trackingNo === item.trackingNo);
+            if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], ...item, id: next[existingIndex].id, influencerId: next[existingIndex].influencerId };
+            else next.unshift(item);
+          });
+          return { ...current, collaborations: next };
+        });
+        setShippingMessage(`已导入 AI 校验后的 ${imported.length} 条样品邮寄记录。`);
+      } });
+    } catch (error) {
+      setShippingMessage(`AI 校验准备失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      if (aiFileRef.current) aiFileRef.current.value = "";
+    }
+  };
+
   return (
     <div>
-      <SectionTitle title="达人邮寄数据" action={<div className="flex items-center gap-2"><span className="hidden text-sm text-[#6f5d55] sm:inline">按物流状态分组</span><button className="btn px-3 py-2 text-xs" onClick={createDraftShipment}><IconCirclePlus size={15} />新建邮寄</button><button className="btn px-3 py-2 text-xs" onClick={exportShippingData}><IconDownload size={15} />导出邮寄表</button></div>} />
+      <SectionTitle title="达人邮寄数据" action={<div className="flex items-center gap-2"><input ref={aiFileRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => reviewShippingWithAi(event.target.files?.[0])} /><span className="hidden text-sm text-[#6f5d55] sm:inline">按物流状态分组</span><button className="btn px-3 py-2 text-xs" onClick={createDraftShipment}><IconCirclePlus size={15} />新建邮寄</button><button className="btn px-3 py-2 text-xs" onClick={() => aiFileRef.current?.click()}><IconSparkles size={15} />AI 校验</button><button className="btn px-3 py-2 text-xs" onClick={exportShippingData}><IconDownload size={15} />导出邮寄表</button></div>} />
       {shippingMessage && <p className="mb-4 rounded-xl border border-[#f8c8ab] bg-[#fee8d9] p-3 text-xs text-[#9a3c0f]">{shippingMessage}</p>}
       <section className="mb-4 grid gap-3 md:grid-cols-4">
         <div className="card p-4"><p className="text-xs text-[#7b6258]">已邮寄单数</p><strong className="mt-2 block text-2xl text-[#f06d22]">{shippingSummary.totalShipments}</strong></div>
@@ -1621,6 +1988,7 @@ function Shipping({ state, setState, month }: { state: AppState; setState: React
         })}
       </div>
       {editingShipment && <ShipmentModal item={editingShipment} onClose={() => setEditingShipment(null)} onSave={saveShipment} />}
+      {aiDialog && <AiImportReviewModal dialog={aiDialog} onClose={() => setAiDialog(null)} />}
     </div>
   );
 }

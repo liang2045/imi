@@ -8,3 +8,7 @@
 - [ ] Add production email templates and invite workflow for team members.
 - [ ] Add a 390px Chrome visual regression capture when viewport emulation is available.
 - [ ] Manually verify the Soft Utility Bento visual integration at desktop and mobile viewports after refreshing the local app; the automated in-app browser connection was unavailable during the 2026-07-14 integration.
+- [ ] Configure the server-side RunningHub AI gateway with `AI_ENABLED=true`, `AI_PROVIDER=runninghub`, `RUNNINGHUB_API_KEY`, model and DingTalk session; keep the model key server-only.
+- [ ] Perform an end-to-end AI review against each Excel table after the shared gateway is configured, including model timeout and malformed-response handling.
+- [ ] Verify the new AI 分析中心 / AI 报告 / AI 审计 pages visually in the app browser and confirm report persistence across reloads.
+- [ ] Configure the shared AI gateway and DingTalk session before enabling cloud semantic answers; local fallback remains deterministic.

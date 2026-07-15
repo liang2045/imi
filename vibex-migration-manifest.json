@@ -1,0 +1,10 @@
+{
+  "name": "imi达人管理 VibeX migration kit",
+  "sourceFramework": "Next.js App Router + TypeScript",
+  "targetFramework": "Vite React + PocketBase",
+  "runningHubModel": "bytedance/doubao-seed-evolving",
+  "usesVibeXDefaultRunningHubBalance": true,
+  "containsSecrets": false,
+  "excluded": [".env.local", "node_modules", ".next", ".git", "*.log"],
+  "entryDocuments": ["VIBEX_MIGRATION_README.md", "VIBEX_MIGRATION_PROMPT.md"]
+}
